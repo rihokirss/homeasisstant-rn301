@@ -56,16 +56,18 @@ SOURCE_MAPPING = {
 _LOGGER = logging.getLogger(__name__)
 
 
-def setup_platform(hass, config, add_entities, discovery_info=None):
-    """Vana setup_platform funktsioon, mida ei pruugita enam vaja olla."""
-    pass  # Või kohanda, kui vajalik
+def setup_platform(hass, config, add_devices, discovery_info=None):
+    devices = []
+    device = YamahaRn301MP(config.get(CONF_NAME), config.get(CONF_HOST))
+    devices.append(device)
+    add_devices(devices)
 
-async def async_setup_entry(hass, entry, async_add_entities):
-    """Seadistage meedia mängija platvorm konfiguratsioonivoo kaudu."""
-    host = entry.data[CONF_HOST]
-    name = entry.data.get(CONF_NAME, DEFAULT_NAME)
-    player = YamahaRn301MP(name, host)
-    async_add_entities([player], True)
+#async def async_setup_entry(hass, entry, async_add_entities):
+#    """Seadistage meedia mängija platvorm konfiguratsioonivoo kaudu."""
+#    host = entry.data[CONF_HOST]
+#    name = entry.data.get(CONF_NAME, DEFAULT_NAME)
+#    player = YamahaRn301MP(name, host)
+#    async_add_entities([player], True)
 
 
 class YamahaRn301MP(MediaPlayerEntity):
