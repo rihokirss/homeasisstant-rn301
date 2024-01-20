@@ -1,35 +1,35 @@
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-from .const import DOMAIN  # Veenduge, et importite oma konstandid õigesti
+from .const import DOMAIN  # Importige vajalikud konstandid
 
-class RN301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Yamaha R-N301 integratsiooni konfiguratsioonivoo klass."""
+class YamahaRN301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Yamaha R-N301 konfiguratsioonivoo klass."""
 
-    VERSION = 1  # Konfiguratsioonivoo versioon, kasutatakse andmete migratsiooniks
+    VERSION = 1
+    CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
     async def async_step_user(self, user_input=None):
-        """Käivitatakse, kui kasutaja lisab integratsiooni läbi kasutajaliidese."""
+        """Käivitage konfiguratsioonivoo esimene samm."""
         errors = {}
 
         if user_input is not None:
-            # Siin saab valideerida kasutaja sisendit (näiteks proovida ühenduda seadmega)
-            # Kui kõik on korras, looge konfiguratsioonientri
+            # Siin saate lisada koodi ressiiveri ühenduse kontrollimiseks
+            # Kui kõik on korras, siis lõpetage voo samm
             return self.async_create_entry(title="Yamaha R-N301", data=user_input)
 
-        # Kuvatav vorm kasutajaliideses
+        data_schema = vol.Schema({
+            vol.Required("host"): str,  # Küsib IP-aadressi
+        })
+
         return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({
-                vol.Required("host"): str,  # Võtke vastu seadme IP-aadress
-            }),
-            errors=errors,
+            step_id="user", data_schema=data_schema, errors=errors
         )
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        """Tagastab võimaluste voo objekti."""
+        """Tagastage valikute voog selle sissejuhatuse jaoks."""
         return OptionsFlowHandler(config_entry)
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
