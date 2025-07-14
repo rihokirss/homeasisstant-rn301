@@ -2,9 +2,10 @@
   "domain": "rn301",
   "name": "Yamaha R-N301",
   "version": "1.1.0",
-  "documentation": "",
+  "documentation": "https://github.com/rihokirss/homeasisstant-rn301#readme",
+  "issue_tracker": "https://github.com/rihokirss/homeasisstant-rn301/issues",
+  "codeowners": ["@rihokirss"],
   "dependencies": [],
-  "codeowners": [],
   "requirements": [],
   "config_flow": true,
   "integration_type": "device"
