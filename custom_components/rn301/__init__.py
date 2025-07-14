@@ -1,6 +1,11 @@
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+import homeassistant.helpers.config_validation as cv
 from .const import DOMAIN, DATA_YAMAHA
+
+# Since this integration supports both config entries and YAML configuration,
+# we need to define a CONFIG_SCHEMA
+CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 def setup(hass, config):
     """Set up the Yamaha R-N301 component."""

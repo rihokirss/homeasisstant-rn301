@@ -2,9 +2,5 @@
     "name": "Yamaha R-N301",
     "content_in_root": false,
     "render_readme": true,
-    "zip_release": false,
-    "domains": ["media_player"],
-    "homeassistant": "2022.3.0",
-    "filename": "rn301.zip",
-    "ignore": ["CLAUDE.md"]
+    "homeassistant": "2022.3.0"
   }
