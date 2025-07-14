@@ -91,7 +91,7 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - ✅ **Improved Error Handling**: Better logging and error messages
 - ✅ **Code Modernization**: English comments and updated architecture
 - ✅ **HACS Compatible**: Easy installation through HACS custom repositories
-- ✅ **Logo Support**: Custom integration icon for better visual identification
+- ✅ **Better Documentation**: Comprehensive README with multiple installation methods
 
 ## Troubleshooting
 
