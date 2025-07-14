@@ -11,9 +11,9 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
 
 from homeassistant.components.media_player.const import (
-    MEDIA_TYPE_PLAYLIST, MEDIA_TYPE_CHANNEL, SUPPORT_NEXT_TRACK, SUPPORT_PAUSE, SUPPORT_PLAY, SUPPORT_PREVIOUS_TRACK,
-    SUPPORT_SELECT_SOURCE, SUPPORT_STOP, SUPPORT_TURN_OFF, SUPPORT_TURN_ON, SUPPORT_VOLUME_MUTE, SUPPORT_VOLUME_SET,
-    SUPPORT_SHUFFLE_SET)
+    MEDIA_TYPE_PLAYLIST, MEDIA_TYPE_CHANNEL)
+from homeassistant.components.media_player import (
+    MediaPlayerEntityFeature)
 from homeassistant.const import (
     CONF_HOST, CONF_NAME, STATE_OFF, STATE_IDLE, STATE_PLAYING, STATE_UNKNOWN)
 
@@ -30,12 +30,12 @@ DEFAULT_TIMEOUT = 5
 BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 
 SERVICE_ENABLE_OUTPUT = 'yamaha_enable_output'
-SUPPORT_YAMAHA = SUPPORT_VOLUME_SET | SUPPORT_VOLUME_MUTE | SUPPORT_TURN_ON | SUPPORT_TURN_OFF | \
-                 SUPPORT_SELECT_SOURCE | SUPPORT_PLAY | SUPPORT_PAUSE | SUPPORT_STOP | \
-                 SUPPORT_NEXT_TRACK | SUPPORT_PREVIOUS_TRACK | SUPPORT_SHUFFLE_SET
+SUPPORT_YAMAHA = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
+                 MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE | MediaPlayerEntityFeature.STOP | \
+                 MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK | MediaPlayerEntityFeature.SHUFFLE_SET
 
-SUPPORTED_PLAYBACK = SUPPORT_VOLUME_SET | SUPPORT_VOLUME_MUTE | SUPPORT_TURN_ON | SUPPORT_TURN_OFF | \
-                     SUPPORT_SELECT_SOURCE | SUPPORT_SHUFFLE_SET
+SUPPORTED_PLAYBACK = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
+                     MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.SHUFFLE_SET
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
@@ -62,12 +62,12 @@ def setup_platform(hass, config, add_devices, discovery_info=None):
     devices.append(device)
     add_devices(devices)
 
-#async def async_setup_entry(hass, entry, async_add_entities):
-#    """Seadistage meedia mängija platvorm konfiguratsioonivoo kaudu."""
-#    host = entry.data[CONF_HOST]
-#    name = entry.data.get(CONF_NAME, DEFAULT_NAME)
-#    player = YamahaRn301MP(name, host)
-#    async_add_entities([player], True)
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up the media player platform from a config entry."""
+    host = entry.data[CONF_HOST]
+    name = entry.data.get(CONF_NAME, DEFAULT_NAME)
+    player = YamahaRn301MP(name, host)
+    async_add_entities([player], True)
 
 
 class YamahaRn301MP(MediaPlayerEntity):
@@ -100,7 +100,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._media_play_album = None
         self._media_play_song = None
         self._media_playback_state = None
-        _LOGGER.debug("Init called")
+        _LOGGER.debug("YamahaRn301MP initialized")
 
     def update(self) -> None:
         data = self._do_api_get("<Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone>")
@@ -225,11 +225,11 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._media_play_control("Play")
 
     def media_pause(self):
-        """Play media"""
+        """Pause media"""
         self._media_play_control("Pause")
 
     def media_stop(self):
-        """Play media"""
+        """Stop media"""
         self._media_play_control("Stop")
 
     def media_next_track(self):
@@ -244,12 +244,16 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     def _do_api_request(self, data) -> str:
         data = '<?xml version="1.0" encoding="utf-8"?>' + data
-        req = requests.post(self._base_url, data=data, timeout=DEFAULT_TIMEOUT)
-        if req.status_code != 200:
-            _LOGGER.exception("Error doing API request, %d, %s", req.status_code, data)
-        else:
-            _LOGGER.debug("API request ok %d", req.status_code)
-        return req.text
+        try:
+            req = requests.post(self._base_url, data=data, timeout=DEFAULT_TIMEOUT)
+            if req.status_code != 200:
+                _LOGGER.warning("Error doing API request, %d, %s", req.status_code, data)
+            else:
+                _LOGGER.debug("API request ok %d", req.status_code)
+            return req.text
+        except requests.exceptions.RequestException as e:
+            _LOGGER.error("Request failed: %s", e)
+            return ""
 
     def _do_api_get(self, data) -> str:
         request = '<YAMAHA_AV cmd="GET">' + data + '</YAMAHA_AV>'
@@ -329,9 +333,9 @@ class YamahaRn301MP(MediaPlayerEntity):
                     except Exception as e:
                         _LOGGER.warning(e)
 
-                _LOGGER.debug("_media_meta")
+                _LOGGER.debug("Media metadata:")
                 _LOGGER.debug(self._media_meta)
             else:
                 self._nullify_media_fields()
-        except:
-            _LOGGER.exception(data)
+        except Exception as e:
+            _LOGGER.exception("Error updating media info: %s", e)

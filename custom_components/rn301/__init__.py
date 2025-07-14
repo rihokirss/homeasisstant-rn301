@@ -1,23 +1,20 @@
-from homeassistant.helpers import discovery
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from .const import DOMAIN, DATA_YAMAHA
 
 def setup(hass, config):
-    """Seadistage Yamaha R-N301 komponent."""
+    """Set up the Yamaha R-N301 component."""
     hass.data[DATA_YAMAHA] = {}
 
-    # Siin võiks olla kood ressiiverite avastamiseks või muuks vajalikuks
+    # Here could be code for discovering receivers or other necessary setup
 
     return True
 
-def async_setup_entry(hass, entry):
-    """Seadistage Yamaha R-N301 ressiiver konfiguratsioonivoo kaudu."""
-    hass.async_create_task(
-        discovery.async_load_platform(hass, 'media_player', DOMAIN, {}, entry)
-    )
-
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+    """Set up Yamaha R-N301 receiver from a config entry."""
+    await hass.config_entries.async_forward_entry_setups(entry, ["media_player"])
     return True
 
-def async_remove_entry(hass, entry):
-    """Käsitsege ressiiveri eemaldamist."""
-    # Siia võib lisada koodi, mis käsitseb ressiiveri eemaldamist
-    pass
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
+    """Handle removal of receiver entry."""
+    return await hass.config_entries.async_unload_platforms(entry, ["media_player"])

@@ -2,40 +2,116 @@
 
 This custom component for Home Assistant provides integration with the Yamaha R-N301 network receiver, enabling control of various functions like power, volume, source selection, and media playback.
 
+**Updated for Home Assistant 2025.10+** - This integration has been modernized with config flow support, async HTTP calls, and compatibility with the latest Home Assistant versions.
+
 ## Features
 
-- **Power Control**: Turn your receiver on or off.
-- **Volume Control**: Adjust the volume and mute state.
-- **Source Selection**: Choose between inputs like Optical, CD, Line, and more.
-- **Media Playback**: Control media playback including play, pause, stop, and track navigation.
-- **Media Information**: Display information about the currently playing track.
+- **Power Control**: Turn your receiver on or off
+- **Volume Control**: Adjust the volume and mute state
+- **Source Selection**: Choose between inputs like Optical, CD, Line, and more
+- **Media Playback**: Control media playback including play, pause, stop, and track navigation
+- **Media Information**: Display information about the currently playing track
+- **Config Flow**: Easy setup through Home Assistant UI with connection testing
+- **Modern Architecture**: Compatible with Home Assistant 2025.10+ using latest APIs
 
 ## Installation
 
-1. Clone or download this repository.
-2. Copy the `rn301` folder to your Home Assistant `custom_components` directory.
-3. Restart Home Assistant.
-4. Add the following configuration to your `configuration.yaml`:
+### Method 1: HACS (Home Assistant Community Store)
+
+1. Install [HACS](https://hacs.xyz/) if you haven't already
+2. In HACS, go to **Integrations**
+3. Click the **⋮** menu → **Custom repositories**
+4. Add repository URL: `https://github.com/rihokirss/homeasisstant-rn301`
+5. Select **Integration** as the category and click **Add**
+6. Find "Yamaha R-N301" in the HACS integrations list and install it
+7. Restart Home Assistant
+8. Go to **Settings** → **Devices & Services** → **Integrations**
+9. Click **Add Integration** and search for "Yamaha R-N301"
+10. Enter your receiver's IP address and optional name
+
+### Method 2: Manual Installation
+
+1. Download or clone this repository
+2. Copy the `custom_components/rn301` folder to your Home Assistant `custom_components` directory
+3. Restart Home Assistant
+4. Go to **Settings** → **Devices & Services** → **Integrations**
+5. Click **Add Integration** and search for "Yamaha R-N301"
+6. Enter your receiver's IP address and optional name
+
+### Method 3: Legacy YAML Configuration
+
+1. Install using Method 1 or 2 above
+2. Add the following to your `configuration.yaml`:
 
    ```yaml
    media_player:
      - platform: rn301
        host: YOUR_RECEIVER_IP
        name: Yamaha R-N301
-   
-Replace `YOUR_RECEIVER_IP` with the IP address of your Yamaha R-N301.
+   ```
+
+3. Replace `YOUR_RECEIVER_IP` with your receiver's IP address
+4. Restart Home Assistant
 
 ## Usage
 
-Once installed and configured, the Yamaha R-N301 will appear as a media player entity in Home Assistant. You can use the Lovelace UI to control it or automate its functions using Home Assistant scripts.
+Once installed and configured, the Yamaha R-N301 will appear as a media player entity in Home Assistant. You can:
+
+- Use the Lovelace UI to control power, volume, source selection, and media playback
+- Create automations and scripts using the media player services
+- Access different input sources with varying capabilities:
+  - **Full Control**: Spotify, Net Radio, Server (play/pause/stop/skip/shuffle)
+  - **Basic Control**: Optical, CD, Line inputs, Tuner (power/volume/source only)
+
+## Configuration Options
+
+When using the UI configuration flow, you can set:
+- **Host**: IP address of your Yamaha R-N301 (required)
+- **Name**: Custom name for the device (optional, defaults to "Yamaha R-N301")
+- **Scan Interval**: How often to update device status (optional, defaults to 30 seconds)
 
 ## Supported Models
 
-This integration is developed for the Yamaha R-N301 but might work with other Yamaha receivers with similar APIs.
+This integration is developed for the Yamaha R-N301 but might work with other Yamaha receivers with similar XML control APIs.
+
+## Compatibility
+
+- **Home Assistant**: 2022.3.0 or later
+- **Home Assistant Core**: 2025.10+ (with modernized features)
+- **Python**: 3.9 or later
+- **Network**: Receiver must be accessible via HTTP on your local network
+
+## Recent Updates
+
+### Version 1.1.0
+- ✅ **Config Flow Support**: Easy setup through Home Assistant UI
+- ✅ **Connection Testing**: Automatic validation during setup
+- ✅ **Modern APIs**: Updated for Home Assistant 2025.10+ compatibility
+- ✅ **Async HTTP**: Non-blocking HTTP calls in config flow
+- ✅ **Improved Error Handling**: Better logging and error messages
+- ✅ **Code Modernization**: English comments and updated architecture
+- ✅ **HACS Compatible**: Easy installation through HACS custom repositories
+- ✅ **Logo Support**: Custom integration icon for better visual identification
+
+## Troubleshooting
+
+**Connection Issues:**
+- Ensure your receiver is on the same network as Home Assistant
+- Check that the IP address is correct and accessible
+- Verify the receiver's network settings are properly configured
+
+**Setup Problems:**
+- Try restarting Home Assistant after installation
+- Check the Home Assistant logs for error messages
+- Ensure no firewall is blocking HTTP requests to the receiver
 
 ## Contributing
 
-If you'd like to contribute to this project, please fork the repository and submit your changes as a pull request.
+Contributions are welcome! Please:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
 
 ## License
 
