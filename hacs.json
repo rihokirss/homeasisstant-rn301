@@ -1,6 +1,6 @@
 {
     "name": "Yamaha R-N301",
-    "content_in_root": true,
+    "content_in_root": false,
     "render_readme": true,
     "zip_release": false,
     "domains": ["media_player"],
