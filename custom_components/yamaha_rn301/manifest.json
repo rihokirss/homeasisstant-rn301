@@ -1,5 +1,5 @@
 {
-  "domain": "rn301",
+  "domain": "yamaha_rn301",
   "name": "Yamaha R-N301",
   "codeowners": ["@rihokirss"],
   "config_flow": true,

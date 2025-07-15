@@ -20,7 +20,7 @@ from homeassistant.const import (
 import homeassistant.util.dt as dt_util
 import homeassistant.helpers.config_validation as cv
 
-DOMAIN = 'rn301'
+DOMAIN = 'yamaha_rn301'
 
 ATTR_ENABLED = 'enabled'
 ATTR_PORT = 'port'
