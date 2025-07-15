@@ -41,7 +41,7 @@ SUPPORTED_PLAYBACK = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeat
                      MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.SHUFFLE_SET
 
 SUPPORT_TUNER = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
-                MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK
+                MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK
 
 SUPPORT_NET_RADIO = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
                     MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA
@@ -191,10 +191,13 @@ class YamahaRn301MP(MediaPlayerEntity):
         if self._source == "Tuner" and self._current_preset:
             freq = self._media_meta.get("frequency", "")
             station = self._media_meta.get("station", "")
+            song = self._media_meta.get("song", "")  # Radio_Text_A (program name)
             
-            title = f"Preset {self._current_preset}"
+            title = f"#{self._current_preset}"
             if station:
-                title += f" - {station}"
+                title += f" {station}"
+            if song:
+                title += f" • {song}"
             if freq:
                 title += f" ({freq})"
             
