@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 import voluptuous as vol
-import requests
+import aiohttp
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
@@ -19,6 +19,7 @@ from homeassistant.const import (
 
 import homeassistant.util.dt as dt_util
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 DOMAIN = 'yamaha_rn301'
 
@@ -100,27 +101,34 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._media_play_album = None
         self._media_play_song = None
         self._media_playback_state = None
+        self._session = None
         _LOGGER.debug("YamahaRn301MP initialized")
 
-    def update(self) -> None:
-        data = self._do_api_get("<Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone>")
-        tree = ET.fromstring(data)
-        for node in tree[0][0]:
-            if node.tag == "Power_Control":
-                self._pwstate = STATE_IDLE if (node[0].text) == "On" else STATE_OFF
-            elif node.tag == "Volume":
-                for voln in node:
-                    if voln.tag == "Lvl":
-                        self._volume = int(voln.find("Val").text) / 50
-                    elif voln.tag == "Mute":
-                        self._muted = voln.text == "On"
-            elif node.tag == "Input":
-
-                txt = node.find("Input_Sel").text
-                self._source = self._reverse_mapping[txt]
-                self._device_source = txt.replace(" ", "_")
-        if self._pwstate != STATE_OFF:
-            self._update_media_playing()
+    async def async_update(self) -> None:
+        data = await self._do_api_get("<Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone>")
+        if not data:
+            return
+        try:
+            tree = ET.fromstring(data)
+            for node in tree[0][0]:
+                if node.tag == "Power_Control":
+                    self._pwstate = STATE_IDLE if (node[0].text) == "On" else STATE_OFF
+                elif node.tag == "Volume":
+                    for voln in node:
+                        if voln.tag == "Lvl":
+                            self._volume = int(voln.find("Val").text) / 50
+                        elif voln.tag == "Mute":
+                            self._muted = voln.text == "On"
+                elif node.tag == "Input":
+                    txt = node.find("Input_Sel").text
+                    self._source = self._reverse_mapping[txt]
+                    self._device_source = txt.replace(" ", "_")
+            if self._pwstate != STATE_OFF:
+                await self._update_media_playing()
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response: %s", e)
+        except Exception as e:
+            _LOGGER.error("Error during update: %s", e)
 
     @property
     def state(self):
@@ -192,81 +200,88 @@ class YamahaRn301MP(MediaPlayerEntity):
     def shuffle(self):
         return self._media_play_shuffle
 
-    def set_shuffle(self, shuffle):
-        self._media_play_control("Shuffle")
+    async def async_set_shuffle(self, shuffle):
+        await self._media_play_control("Shuffle")
 
-    def turn_on(self):
+    async def async_turn_on(self):
         """Turn on the amplifier"""
-        self._set_power_state(True)
+        await self._set_power_state(True)
 
-    def turn_off(self):
+    async def async_turn_off(self):
         """Turn off the amplifier"""
-        self._set_power_state(False)
+        await self._set_power_state(False)
 
-    def set_volume_level(self, volume):
-        self._do_api_put(
+    async def async_set_volume_level(self, volume):
+        await self._do_api_put(
             '<Main_Zone><Volume><Lvl><Val>{0}</Val><Exp>0</Exp><Unit></Unit></Lvl></Volume></Main_Zone>'.format(
                 int(volume * 50)))
 
-    def select_source(self, source):
-        self._do_api_put(
+    async def async_select_source(self, source):
+        await self._do_api_put(
             '<Main_Zone><Input><Input_Sel>{0}</Input_Sel></Input></Main_Zone>'.format(SOURCE_MAPPING[source]))
 
-    def mute_volume(self, mute):
-        self._do_api_put('<System><Volume><Mute>{0}</Mute></Volume></System>'.format('On' if mute else 'Off'))
+    async def async_mute_volume(self, mute):
+        await self._do_api_put('<System><Volume><Mute>{0}</Mute></Volume></System>'.format('On' if mute else 'Off'))
         self._muted = mute
 
-    def _media_play_control(self, command):
-        self._do_api_put(
+    async def _media_play_control(self, command):
+        await self._do_api_put(
             '<{0}><Play_Control><Playback>{1}</Playback></Play_Control></{0}>'.format(self._device_source, command))
 
-    def media_play(self):
+    async def async_media_play(self):
         """Play media"""
-        self._media_play_control("Play")
+        await self._media_play_control("Play")
 
-    def media_pause(self):
+    async def async_media_pause(self):
         """Pause media"""
-        self._media_play_control("Pause")
+        await self._media_play_control("Pause")
 
-    def media_stop(self):
+    async def async_media_stop(self):
         """Stop media"""
-        self._media_play_control("Stop")
+        await self._media_play_control("Stop")
 
-    def media_next_track(self):
-        self._media_play_control("Skip Fwd")
+    async def async_media_next_track(self):
+        await self._media_play_control("Skip Fwd")
 
-    def media_previous_track(self):
-        self._media_play_control("Skip Rev")
+    async def async_media_previous_track(self):
+        await self._media_play_control("Skip Rev")
 
-    def _set_power_state(self, on):
-        self._do_api_put(
+    async def _set_power_state(self, on):
+        await self._do_api_put(
             '<System><Power_Control><Power>{0}</Power></Power_Control></System>'.format("On" if on else "Standby"))
 
-    def _do_api_request(self, data) -> str:
+    async def _do_api_request(self, data) -> str:
         data = '<?xml version="1.0" encoding="utf-8"?>' + data
         try:
-            req = requests.post(self._base_url, data=data, timeout=DEFAULT_TIMEOUT)
-            if req.status_code != 200:
-                _LOGGER.warning("Error doing API request, %d, %s", req.status_code, data)
-            else:
-                _LOGGER.debug("API request ok %d", req.status_code)
-            return req.text
-        except requests.exceptions.RequestException as e:
+            if self._session is None:
+                self._session = async_get_clientsession(self.hass)
+            
+            timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT)
+            async with self._session.post(self._base_url, data=data, timeout=timeout) as req:
+                if req.status != 200:
+                    _LOGGER.warning("Error doing API request, %d, %s", req.status, data)
+                else:
+                    _LOGGER.debug("API request ok %d", req.status)
+                return await req.text()
+        except aiohttp.ClientError as e:
             _LOGGER.error("Request failed: %s", e)
             return ""
+        except Exception as e:
+            _LOGGER.error("Unexpected error during API request: %s", e)
+            return ""
 
-    def _do_api_get(self, data) -> str:
+    async def _do_api_get(self, data) -> str:
         request = '<YAMAHA_AV cmd="GET">' + data + '</YAMAHA_AV>'
         _LOGGER.debug("Request:")
         _LOGGER.debug(request)
-        response = self._do_api_request(request)
+        response = await self._do_api_request(request)
         _LOGGER.debug("Response:")
         _LOGGER.debug(response)
         return response
 
-    def _do_api_put(self, data) -> str:
+    async def _do_api_put(self, data) -> str:
         data = '<YAMAHA_AV cmd="PUT">' + data + '</YAMAHA_AV>'
-        return self._do_api_request(data)
+        return await self._do_api_request(data)
 
     def _nullify_media_fields(self) -> None:
         """Set media fields to null as we don't require them on certain channels"""
@@ -285,7 +300,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         else:
             self._media_playing = False
 
-    def _update_media_playing(self):
+    async def _update_media_playing(self):
         media_meta_mapping = {
             'Artist': 'artist',
             'Station': 'song',
@@ -303,8 +318,10 @@ class YamahaRn301MP(MediaPlayerEntity):
 
         try:
             if self._device_source in device_mapping:
-                data = self._do_api_get(
+                data = await self._do_api_get(
                     "<{0}><Play_Info>GetParam</Play_Info></{0}>".format(device_mapping[self._device_source]))
+                if not data:
+                    return
                 self._media_meta = {}
                 tree = ET.fromstring(data)
                 for node in tree[0][0]:
@@ -322,20 +339,29 @@ class YamahaRn301MP(MediaPlayerEntity):
                         elif node.tag == "Playback_Info":
                             self._set_playback_info(node.text)
                         elif node.tag == "Signal_Info":
-                            node.find("Tuned")
-                            self._set_playback_info(node.find("Tuned").text)
+                            tuned_node = node.find("Tuned")
+                            if tuned_node is not None:
+                                self._set_playback_info(tuned_node.text)
                         elif node.tag == "Tuning":
-                            band = node.find("Band").text
-                            current = node.find("Freq").find("Current")
-                            val = float(current.find("Val").text) / 100
-                            unit = current.find("Unit").text
-                            self._media_meta["frequency"] = f"{band} {val} {unit}"
+                            band_node = node.find("Band")
+                            freq_node = node.find("Freq")
+                            if band_node is not None and freq_node is not None:
+                                current = freq_node.find("Current")
+                                if current is not None:
+                                    val_node = current.find("Val")
+                                    unit_node = current.find("Unit")
+                                    if val_node is not None and unit_node is not None:
+                                        val = float(val_node.text) / 100
+                                        unit = unit_node.text
+                                        self._media_meta["frequency"] = f"{band_node.text} {val} {unit}"
                     except Exception as e:
-                        _LOGGER.warning(e)
+                        _LOGGER.warning("Error parsing media node: %s", e)
 
                 _LOGGER.debug("Media metadata:")
                 _LOGGER.debug(self._media_meta)
             else:
                 self._nullify_media_fields()
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response in media update: %s", e)
         except Exception as e:
             _LOGGER.exception("Error updating media info: %s", e)
