@@ -10,9 +10,11 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 - **Volume Control**: Adjust the volume and mute state
 - **Source Selection**: Choose between inputs like Optical, CD, Line, and more
 - **Media Playback**: Control media playback including play, pause, stop, and track navigation
-- **Media Information**: Display information about the currently playing track
+- **Enhanced Media Information**: Display track info, station names, and frequencies
+- **TUNER Preset Support**: Switch between radio presets using next/previous buttons
+- **NET RADIO Browse Media**: Browse and select internet radio stations directly in Home Assistant
 - **Config Flow**: Easy setup through Home Assistant UI with connection testing
-- **Modern Architecture**: Compatible with Home Assistant 2025.10+ using latest APIs
+- **Modern Architecture**: Fully async implementation compatible with Home Assistant 2025.10+
 
 ## Installation
 
@@ -61,7 +63,8 @@ Once installed and configured, the Yamaha R-N301 will appear as a media player e
 - Create automations and scripts using the media player services
 - Access different input sources with varying capabilities:
   - **Full Control**: Spotify, Net Radio, Server (play/pause/stop/skip/shuffle)
-  - **Basic Control**: Optical, CD, Line inputs, Tuner (power/volume/source only)
+  - **TUNER Control**: Power, volume, source, preset switching via next/previous track buttons
+  - **Basic Control**: Optical, CD, Line inputs (power/volume/source only)
 
 ## Configuration Options
 
@@ -82,6 +85,14 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **Network**: Receiver must be accessible via HTTP on your local network
 
 ## Recent Updates
+
+### Version 1.2.0
+- ✅ **TUNER Preset Support**: Switch between 8 radio presets using next/previous track buttons
+- ✅ **Enhanced Media Information**: Display station names and frequencies for TUNER source
+- ✅ **NET RADIO Browse Media**: Browse and select internet radio stations directly in Home Assistant
+- ✅ **Fully Async Implementation**: Complete conversion to async/await for better performance
+- ✅ **Improved API Communication**: Better error handling and XML parsing
+- ✅ **Modern MediaType Support**: Updated to use latest Home Assistant MediaType enum
 
 ### Version 1.1.0
 - ✅ **Config Flow Support**: Easy setup through Home Assistant UI

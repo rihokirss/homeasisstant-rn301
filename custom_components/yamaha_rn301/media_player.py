@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 from typing import Optional
+import asyncio
 
 import voluptuous as vol
 import aiohttp
@@ -40,7 +41,7 @@ SUPPORTED_PLAYBACK = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeat
                      MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.SHUFFLE_SET
 
 SUPPORT_TUNER = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
-                MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA
+                MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK
 
 SUPPORT_NET_RADIO = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
                     MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA
@@ -189,7 +190,15 @@ class YamahaRn301MP(MediaPlayerEntity):
         """Title of currently playing track"""
         if self._source == "Tuner" and self._current_preset:
             freq = self._media_meta.get("frequency", "")
-            return f"Preset {self._current_preset}" + (f" - {freq}" if freq else "")
+            station = self._media_meta.get("station", "")
+            
+            title = f"Preset {self._current_preset}"
+            if station:
+                title += f" - {station}"
+            if freq:
+                title += f" ({freq})"
+            
+            return title
         elif "song" in self._media_meta and "frequency" in self._media_meta:
             return self._media_meta["song"] if datetime.now().second < 20 else self._media_meta["frequency"]
         elif "song" in self._media_meta:
@@ -258,15 +267,21 @@ class YamahaRn301MP(MediaPlayerEntity):
         await self._media_play_control("Stop")
 
     async def async_media_next_track(self):
-        await self._media_play_control("Skip Fwd")
+        if self._source == "Tuner":
+            await self._next_preset()
+        else:
+            await self._media_play_control("Skip Fwd")
 
     async def async_media_previous_track(self):
-        await self._media_play_control("Skip Rev")
+        if self._source == "Tuner":
+            await self._previous_preset()
+        else:
+            await self._media_play_control("Skip Rev")
 
     async def async_play_media(self, media_type, media_id, **kwargs):
         """Play media - for TUNER presets and NET RADIO stations"""
         if self._source == "Tuner" and media_type == "preset":
-            await self._do_api_put(f'<Tuner><Preset><Preset_Sel>{media_id}</Preset_Sel></Preset></Tuner>')
+            await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{media_id}</Preset_Sel></Preset></Play_Control></Tuner>')
         elif self._source == "Net Radio" and media_type == "station":
             # Navigate to the station and play it
             await self._navigate_and_play_station(media_id)
@@ -335,6 +350,9 @@ class YamahaRn301MP(MediaPlayerEntity):
             'Album': 'album',
             'Song': 'song',
             'Track': 'song',
+            'Program_Service': 'station',
+            'Program_Type': 'genre',
+            'Radio_Text_B': 'description',
         }
         device_mapping = {
             "Spotify": "Spotify",
@@ -410,6 +428,29 @@ class YamahaRn301MP(MediaPlayerEntity):
             _LOGGER.error("Failed to parse XML response in tuner update: %s", e)
         except Exception as e:
             _LOGGER.exception("Error updating tuner info: %s", e)
+
+    async def _next_preset(self):
+        """Switch to next preset (1-8, cycle back to 1)"""
+        try:
+            current = int(self._current_preset) if self._current_preset else 1
+            next_preset = (current % 8) + 1  # Cycle 1-8
+            
+            result = await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{next_preset}</Preset_Sel></Preset></Play_Control></Tuner>')
+            _LOGGER.debug("Switched to next preset: %d (result: %s)", next_preset, result)
+        except (ValueError, TypeError) as e:
+            _LOGGER.warning("Error switching to next preset: %s", e)
+
+    async def _previous_preset(self):
+        """Switch to previous preset (1-8, cycle back to 8)"""
+        try:
+            current = int(self._current_preset) if self._current_preset else 1
+            prev_preset = ((current - 2) % 8) + 1  # Cycle 1-8
+            
+            result = await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{prev_preset}</Preset_Sel></Preset></Play_Control></Tuner>')
+            _LOGGER.debug("Switched to previous preset: %d (result: %s)", prev_preset, result)
+        except (ValueError, TypeError) as e:
+            _LOGGER.warning("Error switching to previous preset: %s", e)
+
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Browse NET RADIO stations"""
