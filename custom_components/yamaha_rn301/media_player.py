@@ -11,7 +11,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
 
 from homeassistant.components.media_player.const import (
-    MEDIA_TYPE_PLAYLIST, MEDIA_TYPE_CHANNEL)
+    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType)
 from homeassistant.components.media_player import (
     MediaPlayerEntityFeature)
 from homeassistant.const import (
@@ -37,6 +37,9 @@ SUPPORT_YAMAHA = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.
 
 SUPPORTED_PLAYBACK = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
                      MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.SHUFFLE_SET
+
+SUPPORT_TUNER = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
+                MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
@@ -102,6 +105,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._media_play_song = None
         self._media_playback_state = None
         self._session = None
+        self._current_preset = None
         _LOGGER.debug("YamahaRn301MP initialized")
 
     async def async_update(self) -> None:
@@ -125,6 +129,8 @@ class YamahaRn301MP(MediaPlayerEntity):
                     self._device_source = txt.replace(" ", "_")
             if self._pwstate != STATE_OFF:
                 await self._update_media_playing()
+                if self._source == "Tuner":
+                    await self._update_tuner_info()
         except ET.ParseError as e:
             _LOGGER.error("Failed to parse XML response: %s", e)
         except Exception as e:
@@ -136,7 +142,9 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     @property
     def supported_features(self):
-        if self._source in ("Optical", "CD", "Line 1", "Line 2", "Line 3", "Tuner"):
+        if self._source == "Tuner":
+            return SUPPORT_TUNER
+        elif self._source in ("Optical", "CD", "Line 1", "Line 2", "Line 3"):
             return SUPPORTED_PLAYBACK
         return SUPPORT_YAMAHA
 
@@ -193,8 +201,8 @@ class YamahaRn301MP(MediaPlayerEntity):
     @property
     def media_content_type(self):
         if self._source == "Net Radio" or self._source == "Tuner":
-            return MEDIA_TYPE_CHANNEL
-        return MEDIA_TYPE_PLAYLIST
+            return MediaType.CHANNEL
+        return MediaType.PLAYLIST
 
     @property
     def shuffle(self):
@@ -245,6 +253,13 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def async_media_previous_track(self):
         await self._media_play_control("Skip Rev")
+
+    async def async_play_media(self, media_type, media_id, **kwargs):
+        """Play media - for TUNER presets"""
+        if self._source == "Tuner" and media_type == "preset":
+            await self._do_api_put(f'<Tuner><Preset><Preset_Sel>{media_id}</Preset_Sel></Preset></Tuner>')
+        else:
+            _LOGGER.warning("Play media not supported for source %s with type %s", self._source, media_type)
 
     async def _set_power_state(self, on):
         await self._do_api_put(
@@ -365,3 +380,21 @@ class YamahaRn301MP(MediaPlayerEntity):
             _LOGGER.error("Failed to parse XML response in media update: %s", e)
         except Exception as e:
             _LOGGER.exception("Error updating media info: %s", e)
+
+    async def _update_tuner_info(self):
+        """Update tuner-specific information including current preset"""
+        try:
+            data = await self._do_api_get("<Tuner><Play_Info>GetParam</Play_Info></Tuner>")
+            if not data:
+                return
+            tree = ET.fromstring(data)
+            for node in tree[0][0]:
+                if node.tag == "Preset":
+                    preset_node = node.find("Preset_Sel")
+                    if preset_node is not None:
+                        self._current_preset = preset_node.text
+                        _LOGGER.debug("Current preset: %s", self._current_preset)
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response in tuner update: %s", e)
+        except Exception as e:
+            _LOGGER.exception("Error updating tuner info: %s", e)
