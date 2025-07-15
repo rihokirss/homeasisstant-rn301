@@ -11,7 +11,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
 
 from homeassistant.components.media_player.const import (
-    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType)
+    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType, BrowseMedia)
 from homeassistant.components.media_player import (
     MediaPlayerEntityFeature)
 from homeassistant.const import (
@@ -40,6 +40,9 @@ SUPPORTED_PLAYBACK = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeat
 
 SUPPORT_TUNER = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
                 MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA
+
+SUPPORT_NET_RADIO = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
+                    MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
@@ -144,6 +147,8 @@ class YamahaRn301MP(MediaPlayerEntity):
     def supported_features(self):
         if self._source == "Tuner":
             return SUPPORT_TUNER
+        elif self._source == "Net Radio":
+            return SUPPORT_NET_RADIO
         elif self._source in ("Optical", "CD", "Line 1", "Line 2", "Line 3"):
             return SUPPORTED_PLAYBACK
         return SUPPORT_YAMAHA
@@ -181,7 +186,10 @@ class YamahaRn301MP(MediaPlayerEntity):
     @property
     def media_title(self):
         """Title of currently playing track"""
-        if "song" in self._media_meta and "frequency" in self._media_meta:
+        if self._source == "Tuner" and self._current_preset:
+            freq = self._media_meta.get("frequency", "")
+            return f"Preset {self._current_preset}" + (f" - {freq}" if freq else "")
+        elif "song" in self._media_meta and "frequency" in self._media_meta:
             return self._media_meta["song"] if datetime.now().second < 20 else self._media_meta["frequency"]
         elif "song" in self._media_meta:
             return self._media_meta.get("song")
@@ -255,9 +263,12 @@ class YamahaRn301MP(MediaPlayerEntity):
         await self._media_play_control("Skip Rev")
 
     async def async_play_media(self, media_type, media_id, **kwargs):
-        """Play media - for TUNER presets"""
+        """Play media - for TUNER presets and NET RADIO stations"""
         if self._source == "Tuner" and media_type == "preset":
             await self._do_api_put(f'<Tuner><Preset><Preset_Sel>{media_id}</Preset_Sel></Preset></Tuner>')
+        elif self._source == "Net Radio" and media_type == "station":
+            # Navigate to the station and play it
+            await self._navigate_and_play_station(media_id)
         else:
             _LOGGER.warning("Play media not supported for source %s with type %s", self._source, media_type)
 
@@ -398,3 +409,162 @@ class YamahaRn301MP(MediaPlayerEntity):
             _LOGGER.error("Failed to parse XML response in tuner update: %s", e)
         except Exception as e:
             _LOGGER.exception("Error updating tuner info: %s", e)
+
+    async def async_browse_media(self, media_content_type=None, media_content_id=None):
+        """Browse NET RADIO stations"""
+        if self._source != "Net Radio":
+            return None
+        
+        try:
+            if media_content_id is None:
+                # Root level - show main menu
+                return await self._browse_net_radio_root()
+            else:
+                # Browse specific menu item
+                return await self._browse_net_radio_item(media_content_id)
+        except Exception as e:
+            _LOGGER.exception("Error browsing media: %s", e)
+            return None
+
+    async def _browse_net_radio_root(self):
+        """Browse NET RADIO root menu"""
+        data = await self._do_api_get("<NET_RADIO><List_Info>GetParam</List_Info></NET_RADIO>")
+        if not data:
+            _LOGGER.warning("No data received from NET RADIO browse")
+            return None
+        
+        try:
+            tree = ET.fromstring(data)
+            children = []
+            
+            for node in tree[0][0]:
+                if node.tag == "Current_List":
+                    for line in node:
+                        if line.tag.startswith("Line_"):
+                            txt_node = line.find("Txt")
+                            attr_node = line.find("Attribute")
+                            
+                            if txt_node is not None and attr_node is not None:
+                                title = txt_node.text
+                                attr = attr_node.text
+                                
+                                if title and attr == "Container":
+                                    children.append(BrowseMedia(
+                                        title=title,
+                                        media_class=MediaType.CHANNEL,
+                                        media_content_id=f"menu:{line.tag}",
+                                        media_content_type="folder",
+                                        can_play=False,
+                                        can_expand=True,
+                                    ))
+            
+            if not children:
+                _LOGGER.warning("No browsable items found in NET RADIO menu")
+                return BrowseMedia(
+                    title="NET RADIO",
+                    media_class=MediaType.CHANNEL,
+                    media_content_id="root",
+                    media_content_type="folder",
+                    can_play=False,
+                    can_expand=False,
+                    children=[BrowseMedia(
+                        title="No stations available",
+                        media_class=MediaType.CHANNEL,
+                        media_content_id="empty",
+                        media_content_type="info",
+                        can_play=False,
+                        can_expand=False,
+                    )],
+                )
+            
+            return BrowseMedia(
+                title="NET RADIO",
+                media_class=MediaType.CHANNEL,
+                media_content_id="root",
+                media_content_type="folder",
+                can_play=False,
+                can_expand=True,
+                children=children,
+            )
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response in browse: %s", e)
+            return None
+
+    async def _browse_net_radio_item(self, media_content_id):
+        """Browse specific NET RADIO menu item"""
+        if not media_content_id.startswith("menu:"):
+            return None
+        
+        line_id = media_content_id.split(":", 1)[1]
+        
+        # Navigate to the menu item
+        await self._do_api_put(f'<NET_RADIO><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></NET_RADIO>')
+        
+        # Get the new list
+        data = await self._do_api_get("<NET_RADIO><List_Info>GetParam</List_Info></NET_RADIO>")
+        if not data:
+            return None
+        
+        try:
+            tree = ET.fromstring(data)
+            children = []
+            menu_name = "NET RADIO"
+            
+            for node in tree[0][0]:
+                if node.tag == "Menu_Name":
+                    menu_name = node.text
+                elif node.tag == "Current_List":
+                    for line in node:
+                        if line.tag.startswith("Line_"):
+                            txt_node = line.find("Txt")
+                            attr_node = line.find("Attribute")
+                            
+                            if txt_node is not None and attr_node is not None:
+                                title = txt_node.text
+                                attr = attr_node.text
+                                
+                                if title:
+                                    if attr == "Container":
+                                        children.append(BrowseMedia(
+                                            title=title,
+                                            media_class=MediaType.CHANNEL,
+                                            media_content_id=f"menu:{line.tag}",
+                                            media_content_type="folder",
+                                            can_play=False,
+                                            can_expand=True,
+                                        ))
+                                    elif attr == "Item":
+                                        children.append(BrowseMedia(
+                                            title=title,
+                                            media_class=MediaType.CHANNEL,
+                                            media_content_id=f"station:{line.tag}",
+                                            media_content_type="station",
+                                            can_play=True,
+                                            can_expand=False,
+                                        ))
+            
+            return BrowseMedia(
+                title=menu_name,
+                media_class=MediaType.CHANNEL,
+                media_content_id=media_content_id,
+                media_content_type="folder",
+                can_play=False,
+                can_expand=True,
+                children=children,
+            )
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response in browse item: %s", e)
+            return None
+
+    async def _navigate_and_play_station(self, media_id):
+        """Navigate to and play a NET RADIO station"""
+        if not media_id.startswith("station:"):
+            return
+        
+        line_id = media_id.split(":", 1)[1]
+        
+        # Select the station
+        await self._do_api_put(f'<NET_RADIO><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></NET_RADIO>')
+        
+        # Start playing
+        await self._do_api_put('<NET_RADIO><Play_Control><Playback>Play</Playback></Play_Control></NET_RADIO>')
