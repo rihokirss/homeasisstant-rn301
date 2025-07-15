@@ -11,7 +11,8 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
 
 from homeassistant.components.media_player.const import (
-    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType, BrowseMedia)
+    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType)
+from homeassistant.components.media_player import BrowseMedia
 from homeassistant.components.media_player import (
     MediaPlayerEntityFeature)
 from homeassistant.const import (
