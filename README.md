@@ -88,7 +88,7 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 
 ### Version 1.2.0
 - ✅ **TUNER Preset Support**: Switch between 8 radio presets using next/previous track buttons
-- ✅ **Enhanced Media Information**: Display station names and frequencies for TUNER source
+- ✅ **Enhanced Media Information**: Display station names, program info, and frequencies for TUNER source (e.g., "#4 RAADIO 2 • FKA TWIGS - Striptease_ (FM 101.6 MHz)")
 - ✅ **NET RADIO Browse Media**: Browse and select internet radio stations directly in Home Assistant
 - ✅ **Fully Async Implementation**: Complete conversion to async/await for better performance
 - ✅ **Improved API Communication**: Better error handling and XML parsing
