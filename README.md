@@ -86,6 +86,10 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 
 ## Recent Updates
 
+### Version 1.2.1
+- 🐛 **Bug Fix**: Fixed volume control mapping between Home Assistant and receiver
+- 🔧 **Volume Scaling**: Corrected volume conversion to properly map 0-100% range
+
 ### Version 1.2.0
 - ✅ **TUNER Preset Support**: Switch between 8 radio presets using next/previous track buttons
 - ✅ **Enhanced Media Information**: Display station names, program info, and frequencies for TUNER source (e.g., "#4 RAADIO 2 • FKA TWIGS - Striptease_ (FM 101.6 MHz)")
