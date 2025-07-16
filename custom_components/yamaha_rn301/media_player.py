@@ -125,7 +125,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                 elif node.tag == "Volume":
                     for voln in node:
                         if voln.tag == "Lvl":
-                            self._volume = int(voln.find("Val").text) / 50
+                            self._volume = int(voln.find("Val").text) / 100
                         elif voln.tag == "Mute":
                             self._muted = voln.text == "On"
                 elif node.tag == "Input":
@@ -243,7 +243,7 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def async_set_volume_level(self, volume):
         await self._do_api_put(
             '<Main_Zone><Volume><Lvl><Val>{0}</Val><Exp>0</Exp><Unit></Unit></Lvl></Volume></Main_Zone>'.format(
-                int(volume * 50)))
+                int(volume * 100)))
 
     async def async_select_source(self, source):
         await self._do_api_put(
