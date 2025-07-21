@@ -11,9 +11,11 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 - **Source Selection**: Choose between inputs like Optical, CD, Line, and more
 - **Media Playback**: Control media playback including play, pause, stop, and track navigation
 - **Enhanced Media Information**: Display track info, station names, and frequencies
-- **TUNER Preset Support**: Switch between radio presets using next/previous buttons
+- **TUNER Preset Support**: Switch between radio presets using next/previous buttons (works even without signal lock)
 - **NET RADIO Browse Media**: Browse and select internet radio stations directly in Home Assistant
 - **Config Flow**: Easy setup through Home Assistant UI with connection testing
+- **IP Address Management**: Change receiver IP address through Home Assistant UI (Settings → Configure)
+- **Unique Entity ID**: Full UI management support for device settings
 - **Modern Architecture**: Fully async implementation compatible with Home Assistant 2025.10+
 
 ## Installation
@@ -69,9 +71,16 @@ Once installed and configured, the Yamaha R-N301 will appear as a media player e
 ## Configuration Options
 
 When using the UI configuration flow, you can set:
-- **Host**: IP address of your Yamaha R-N301 (required)
-- **Name**: Custom name for the device (optional, defaults to "Yamaha R-N301")
-- **Scan Interval**: How often to update device status (optional, defaults to 30 seconds)
+- **Host**: IP address of your Yamaha R-N301 (required, can be changed later)
+- **Name**: Custom name for the device (optional, defaults to "Yamaha R-N301", can be changed later)
+
+**Changing Configuration Later:**
+You can modify the IP address and device name anytime through:
+1. Go to **Settings** → **Devices & Services**
+2. Find your Yamaha R-N301 integration
+3. Click **Configure**
+4. Update IP address and/or name
+5. The integration will automatically reload with new settings
 
 ## Supported Models
 
@@ -85,6 +94,14 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **Network**: Receiver must be accessible via HTTP on your local network
 
 ## Recent Updates
+
+### Version 1.3.0
+- 🎛️ **IP Address Management**: Change receiver IP address through Home Assistant UI without removing/re-adding integration
+- 🏷️ **Unique Entity ID**: Added unique_id property for full UI management support
+- 🎵 **Enhanced TUNER Controls**: Preset navigation buttons now work even when frequency is not locked (weak signals)
+- ⚡ **Performance Improvements**: Eliminated duplicate API calls and optimized preset detection
+- 🔧 **Code Modernization**: Removed deprecated config_entry assignment warnings for Home Assistant 2025.12+ compatibility
+- 🧹 **Code Cleanup**: Streamlined codebase with better error handling and reduced logging overhead
 
 ### Version 1.2.1
 - 🐛 **Bug Fix**: Fixed volume control mapping between Home Assistant and receiver
