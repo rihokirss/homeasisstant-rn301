@@ -660,66 +660,33 @@ class YamahaRn301MP(MediaPlayerEntity):
         
         _LOGGER.debug(f"Playing track with ID: {media_id}")
         
-        # Parse the media_id: server_track:root:folder_path:line_id:page:page_number
+        # SIMPLIFIED APPROACH: Just play the track directly
+        # The API should already be in the correct position due to browsing context
+        # We extract the line_id and play it directly
+        
         parts = media_id.split(":")
         if len(parts) < 3:
             return
         
-        # Check if this has pagination info
-        if "page:" in media_id:
-            # Find page info
-            page_index = None
-            target_page = None
-            for i, part in enumerate(parts):
-                if part == "page" and i + 1 < len(parts):
-                    target_page = int(parts[i + 1])
-                    page_index = i
+        # Extract Line_X from the path - it should be the last part
+        line_id = parts[-1] if parts[-1].startswith("Line_") else None
+        
+        if not line_id:
+            # Fallback - find any part that looks like Line_X
+            for part in reversed(parts):
+                if part.startswith("Line_"):
+                    line_id = part
                     break
-            
-            if target_page and page_index:
-                # Extract line_id (part before :page:)
-                line_id = parts[page_index - 1]
-                
-                # Navigate to correct page first
-                current_data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
-                if current_data:
-                    try:
-                        tree = ET.fromstring(current_data)
-                        current_line = 1
-                        for node in tree[0][0]:
-                            if node.tag == "Cursor_Position":
-                                for cursor_node in node:
-                                    if cursor_node.tag == "Current_Line":
-                                        current_line = int(cursor_node.text) if cursor_node.text else 1
-                                        break
-                        
-                        # Navigate to correct page
-                        while current_line != target_page:
-                            if current_line < target_page:
-                                await self._do_api_put('<SERVER><List_Control><Page>Down</Page></List_Control></SERVER>')
-                                current_line += 8
-                            else:
-                                await self._do_api_put('<SERVER><List_Control><Page>Up</Page></List_Control></SERVER>')
-                                current_line -= 8
-                            await asyncio.sleep(0.2)
-                        
-                    except ET.ParseError:
-                        pass
-                
-                # Now select and play the track
-                await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></SERVER>')
-                await asyncio.sleep(0.2)
-                
-            else:
-                # Fallback to direct selection
-                line_id = parts[-3] if len(parts) > 2 else parts[-1]
-                await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></SERVER>')
-                await asyncio.sleep(0.2)
-        else:
-            # Old style without pagination - direct selection
-            line_id = parts[-1]
-            await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></SERVER>')
-            await asyncio.sleep(0.2)
+        
+        if not line_id:
+            _LOGGER.warning(f"Could not extract line_id from {media_id}")
+            return
+        
+        _LOGGER.debug(f"Playing line: {line_id}")
+        
+        # Play the track directly - API should be in correct location
+        await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></SERVER>')
+        await asyncio.sleep(0.2)
         
         # Start playing
         await self._do_api_put('<SERVER><Play_Control><Playback>Play</Playback></Play_Control></SERVER>')
@@ -879,13 +846,11 @@ class YamahaRn301MP(MediaPlayerEntity):
                                         can_expand=True,
                                     ))
                                 elif attr == "Item":
-                                    # Track/File - include pagination info in ID
+                                    # Track/File - simple ID without pagination complexity
                                     track_path = f"{current_path}:{line.tag}" if current_path else line.tag
-                                    # Add current line position to track ID for pagination context
-                                    track_id = f"server_track:root:{track_path}:page:{current_line}"
                                     children.append(BrowseMedia(
                                         media_class=MediaType.TRACK,
-                                        media_content_id=track_id,
+                                        media_content_id=f"server_track:root:{track_path}",
                                         media_content_type="music",
                                         title=title,
                                         can_play=True,
@@ -1058,13 +1023,11 @@ class YamahaRn301MP(MediaPlayerEntity):
                                         thumbnail=None,
                                     ))
                                 elif attr == "Item":
-                                    # Track/File - include pagination info in ID
+                                    # Track/File - simple ID without pagination complexity
                                     track_path = f"{current_path}:{line.tag}" if current_path else line.tag
-                                    # Add current line position to track ID for pagination context
-                                    track_id = f"server_track:root:{track_path}:page:{current_line}"
                                     children.append(BrowseMedia(
                                         media_class=MediaType.TRACK,
-                                        media_content_id=track_id,
+                                        media_content_id=f"server_track:root:{track_path}",
                                         media_content_type="music",
                                         title=title,
                                         can_play=True,
