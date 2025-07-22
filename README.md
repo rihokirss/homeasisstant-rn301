@@ -94,6 +94,13 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 
 ## Recent Updates
 
+### Version 1.4.2 - Media Browsing Standards Compliance
+- **FIXED**: Updated media browsing to use MediaClass instead of MediaType for proper Home Assistant standards compliance
+- **IMPROVED**: NET RADIO browsing now uses MediaClass.DIRECTORY for folders and MediaClass.TRACK for stations
+- **IMPROVED**: SERVER browsing now uses MediaClass.DIRECTORY/ALBUM for containers and MediaClass.TRACK for playable items
+- **ENHANCED**: Intelligent media class selection - albums use MediaClass.ALBUM, other folders use MediaClass.DIRECTORY
+- **TECHNICAL**: Follows Home Assistant's media player integration standards where MediaClass categorizes browsing hierarchy and MediaType identifies playback content type
+
 ### Version 1.4.1 - Code Refactoring and Cleanup
 - **IMPROVED**: Major code quality improvements with ~250 fewer lines
 - **REFACTORED**: Eliminated duplicate XML parsing logic (saved ~135 lines)
