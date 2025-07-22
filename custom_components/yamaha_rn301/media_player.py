@@ -477,6 +477,7 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Browse NET RADIO stations and SERVER media"""
+        _LOGGER.debug(f"async_browse_media called: source={self._source}, content_type={media_content_type}, content_id={media_content_id}")
         if self._source == "Net Radio":
             try:
                 if media_content_id is None:
@@ -671,6 +672,7 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def _browse_server_root(self):
         """Browse SERVER root menu (server selection)"""
+        _LOGGER.debug("_browse_server_root called")
         # Reset to root level first
         await self._reset_server_to_root()
         
@@ -736,6 +738,7 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def _browse_server_item(self, media_content_id):
         """Browse specific SERVER menu item (folders/albums/tracks)"""
+        _LOGGER.debug(f"_browse_server_item called with: {media_content_id}")
         if not media_content_id.startswith("server_menu:"):
             return await self._browse_server_back(media_content_id)
         
