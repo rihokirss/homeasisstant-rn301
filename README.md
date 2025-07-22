@@ -20,18 +20,17 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 
 ## Installation
 
-### Method 1: HACS (Home Assistant Community Store)
+### Method 1: HACS (Home Assistant Community Store) - Recommended
 
 1. Install [HACS](https://hacs.xyz/) if you haven't already
 2. In HACS, go to **Integrations**
-3. Click the **⋮** menu → **Custom repositories**
-4. Add repository URL: `https://github.com/rihokirss/homeasisstant-rn301`
-5. Select **Integration** as the category and click **Add**
-6. Find "Yamaha R-N301" in the HACS integrations list and install it
-7. Restart Home Assistant
-8. Go to **Settings** → **Devices & Services** → **Integrations**
-9. Click **Add Integration** and search for "Yamaha R-N301"
-10. Enter your receiver's IP address and optional name
+3. Search for "Yamaha R-N301" and click **Download**
+4. Restart Home Assistant
+5. Go to **Settings** → **Devices & Services** → **Integrations**
+6. Click **Add Integration** and search for "Yamaha R-N301"
+7. Enter your receiver's IP address and optional name
+
+> 🎉 **Now available in HACS default repositories!** No need to add custom repository URL anymore.
 
 ### Method 2: Manual Installation
 
