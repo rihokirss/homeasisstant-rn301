@@ -184,6 +184,10 @@ class YamahaRn301MP(MediaPlayerEntity):
         return self._unique_id
 
     @property
+    def device_class(self) -> str:
+        return "receiver"
+
+    @property
     def is_volume_muted(self) -> bool:
         return self._muted
 
@@ -308,7 +312,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             # Navigate to the track and play it
             await self._navigate_and_play_track(media_id)
         elif self._source == "Server" and media_type == "info":
-            # Ignore info type media (like "No servers available")
+            # Ignore info type media (like "No servers available", page info, etc.)
             _LOGGER.debug("Ignoring info type media for SERVER source")
         else:
             _LOGGER.warning("Play media not supported for source %s with type %s", self._source, media_type)
@@ -654,21 +658,68 @@ class YamahaRn301MP(MediaPlayerEntity):
         if not media_id.startswith("server_track:"):
             return
         
-        # Parse the path: server_track:root:Line_1:Line_2:Line_3
+        _LOGGER.debug(f"Playing track with ID: {media_id}")
+        
+        # Parse the media_id: server_track:root:folder_path:line_id:page:page_number
         parts = media_id.split(":")
         if len(parts) < 3:
             return
         
-        path_parts = parts[2:]  # Skip 'server_track' and 'root'
-        
-        # Reset to root first
-        await self._reset_server_to_root()
-        
-        # Navigate through the path to reach the track
-        for step in path_parts:
-            await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{step}</Direct_Sel></List_Control></SERVER>')
-            # Wait a bit for navigation to complete
-            await asyncio.sleep(0.5)
+        # Check if this has pagination info
+        if "page:" in media_id:
+            # Find page info
+            page_index = None
+            target_page = None
+            for i, part in enumerate(parts):
+                if part == "page" and i + 1 < len(parts):
+                    target_page = int(parts[i + 1])
+                    page_index = i
+                    break
+            
+            if target_page and page_index:
+                # Extract line_id (part before :page:)
+                line_id = parts[page_index - 1]
+                
+                # Navigate to correct page first
+                current_data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
+                if current_data:
+                    try:
+                        tree = ET.fromstring(current_data)
+                        current_line = 1
+                        for node in tree[0][0]:
+                            if node.tag == "Cursor_Position":
+                                for cursor_node in node:
+                                    if cursor_node.tag == "Current_Line":
+                                        current_line = int(cursor_node.text) if cursor_node.text else 1
+                                        break
+                        
+                        # Navigate to correct page
+                        while current_line != target_page:
+                            if current_line < target_page:
+                                await self._do_api_put('<SERVER><List_Control><Page>Down</Page></List_Control></SERVER>')
+                                current_line += 8
+                            else:
+                                await self._do_api_put('<SERVER><List_Control><Page>Up</Page></List_Control></SERVER>')
+                                current_line -= 8
+                            await asyncio.sleep(0.2)
+                        
+                    except ET.ParseError:
+                        pass
+                
+                # Now select and play the track
+                await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></SERVER>')
+                await asyncio.sleep(0.2)
+                
+            else:
+                # Fallback to direct selection
+                line_id = parts[-3] if len(parts) > 2 else parts[-1]
+                await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></SERVER>')
+                await asyncio.sleep(0.2)
+        else:
+            # Old style without pagination - direct selection
+            line_id = parts[-1]
+            await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{line_id}</Direct_Sel></List_Control></SERVER>')
+            await asyncio.sleep(0.2)
         
         # Start playing
         await self._do_api_put('<SERVER><Play_Control><Playback>Play</Playback></Play_Control></SERVER>')
@@ -739,6 +790,21 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def _browse_server_item(self, media_content_id):
         """Browse specific SERVER menu item (folders/albums/tracks)"""
         _LOGGER.debug(f"_browse_server_item called with: {media_content_id}")
+        
+        # Handle pagination commands
+        if media_content_id.startswith("server_page_up:"):
+            original_id = media_content_id[15:]  # Remove "server_page_up:" prefix
+            await self._do_api_put('<SERVER><List_Control><Page>Up</Page></List_Control></SERVER>')
+            await asyncio.sleep(0.2)
+            # Get the updated list without resetting navigation
+            return await self._get_current_server_list(original_id)
+        elif media_content_id.startswith("server_page_down:"):
+            original_id = media_content_id[17:]  # Remove "server_page_down:" prefix
+            await self._do_api_put('<SERVER><List_Control><Page>Down</Page></List_Control></SERVER>')
+            await asyncio.sleep(0.2)
+            # Get the updated list without resetting navigation
+            return await self._get_current_server_list(original_id)
+        
         if not media_content_id.startswith("server_menu:"):
             return await self._browse_server_back(media_content_id)
         
@@ -774,6 +840,8 @@ class YamahaRn301MP(MediaPlayerEntity):
             children = []
             menu_name = "Server"
             menu_layer = 1
+            current_line = 1
+            max_line = 1
             
             # Reconstruct current path from media_content_id
             current_path = ":".join(parts[2:])  # parts from earlier
@@ -783,6 +851,12 @@ class YamahaRn301MP(MediaPlayerEntity):
                     menu_name = node.text or "Server"
                 elif node.tag == "Menu_Layer":
                     menu_layer = int(node.text) if node.text else 1
+                elif node.tag == "Cursor_Position":
+                    for cursor_node in node:
+                        if cursor_node.tag == "Current_Line":
+                            current_line = int(cursor_node.text) if cursor_node.text else 1
+                        elif cursor_node.tag == "Max_Line":
+                            max_line = int(cursor_node.text) if cursor_node.text else 1
                 elif node.tag == "Current_List":
                     for line in node:
                         if line.tag.startswith("Line_"):
@@ -805,17 +879,59 @@ class YamahaRn301MP(MediaPlayerEntity):
                                         can_expand=True,
                                     ))
                                 elif attr == "Item":
-                                    # Track/File - use current path for context
+                                    # Track/File - include pagination info in ID
                                     track_path = f"{current_path}:{line.tag}" if current_path else line.tag
+                                    # Add current line position to track ID for pagination context
+                                    track_id = f"server_track:root:{track_path}:page:{current_line}"
                                     children.append(BrowseMedia(
                                         media_class=MediaType.TRACK,
-                                        media_content_id=f"server_track:root:{track_path}",
+                                        media_content_id=track_id,
                                         media_content_type="music",
                                         title=title,
                                         can_play=True,
                                         can_expand=False,
+                                        thumbnail=None,
                                     ))
             
+            # Add pagination controls if there are more items than displayed
+            if max_line > 8:
+                # Add "Previous Page" if not on first page
+                if current_line > 1:
+                    children.append(BrowseMedia(
+                        media_class=MediaType.MUSIC,
+                        media_content_id=f"server_page_up:{media_content_id}",
+                        media_content_type="info",
+                        title="⬆️ Previous Page",
+                        can_play=False,
+                        can_expand=True,
+                        thumbnail=None,
+                    ))
+                
+                # Add "Next Page" if not on last page
+                if current_line + 7 < max_line:  # 8 items per page, so +7 from current
+                    children.append(BrowseMedia(
+                        media_class=MediaType.MUSIC,
+                        media_content_id=f"server_page_down:{media_content_id}",
+                        media_content_type="info",
+                        title="⬇️ Next Page",
+                        can_play=False,
+                        can_expand=True,
+                        thumbnail=None,
+                    ))
+                
+                # Add page info
+                current_page = (current_line - 1) // 8 + 1
+                total_pages = (max_line - 1) // 8 + 1
+                children.append(BrowseMedia(
+                    media_class=MediaType.MUSIC,
+                    media_content_id="page_info",
+                    media_content_type="info",
+                    title=f"📄 Page {current_page} of {total_pages} ({max_line} items)",
+                    can_play=False,
+                    can_expand=False,
+                    thumbnail=None,
+                ))
+
             # Add back navigation if not at root level
             if menu_layer > 1:
                 # Create parent path by removing last element
@@ -877,6 +993,160 @@ class YamahaRn301MP(MediaPlayerEntity):
                 return None
         
         return None
+
+    async def _get_current_server_list(self, media_content_id):
+        """Get current SERVER list without navigation reset - used for pagination"""
+        _LOGGER.debug(f"_get_current_server_list called with: {media_content_id}")
+        
+        try:
+            # Parse the original path for context
+            parts = media_content_id.split(":")
+            
+            # Get the current list state after pagination
+            data = None
+            for attempt in range(5):  # Max 5 attempts
+                data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
+                if data and 'Menu_Status>Busy<' not in data:
+                    break
+                await asyncio.sleep(0.5)
+            
+            if not data:
+                _LOGGER.warning("No data received in _get_current_server_list")
+                return None
+
+            tree = ET.fromstring(data)
+            children = []
+            menu_name = "Server"
+            menu_layer = 1
+            current_line = 1
+            max_line = 1
+            
+            # Get current path for context
+            current_path = ":".join(parts[2:]) if len(parts) > 2 else ""
+            
+            for node in tree[0][0]:
+                if node.tag == "Menu_Name":
+                    menu_name = node.text or "Server"
+                elif node.tag == "Menu_Layer":
+                    menu_layer = int(node.text) if node.text else 1
+                elif node.tag == "Cursor_Position":
+                    for cursor_node in node:
+                        if cursor_node.tag == "Current_Line":
+                            current_line = int(cursor_node.text) if cursor_node.text else 1
+                        elif cursor_node.tag == "Max_Line":
+                            max_line = int(cursor_node.text) if cursor_node.text else 1
+                elif node.tag == "Current_List":
+                    for line in node:
+                        if line.tag.startswith("Line_"):
+                            txt_node = line.find("Txt")
+                            attr_node = line.find("Attribute")
+                            
+                            if txt_node is not None and attr_node is not None and txt_node.text:
+                                title = txt_node.text
+                                attr = attr_node.text
+                                
+                                if attr == "Container":
+                                    # Folder/Album - extend current path
+                                    new_path = f"{current_path}:{line.tag}" if current_path else line.tag
+                                    children.append(BrowseMedia(
+                                        media_class=MediaType.MUSIC,
+                                        media_content_id=f"server_menu:root:{new_path}",
+                                        media_content_type="album" if menu_layer > 4 else "folder",
+                                        title=title,
+                                        can_play=False,
+                                        can_expand=True,
+                                        thumbnail=None,
+                                    ))
+                                elif attr == "Item":
+                                    # Track/File - include pagination info in ID
+                                    track_path = f"{current_path}:{line.tag}" if current_path else line.tag
+                                    # Add current line position to track ID for pagination context
+                                    track_id = f"server_track:root:{track_path}:page:{current_line}"
+                                    children.append(BrowseMedia(
+                                        media_class=MediaType.TRACK,
+                                        media_content_id=track_id,
+                                        media_content_type="music",
+                                        title=title,
+                                        can_play=True,
+                                        can_expand=False,
+                                        thumbnail=None,
+                                    ))
+            
+            # Add pagination controls if there are more items than displayed
+            if max_line > 8:
+                # Add "Previous Page" if not on first page
+                if current_line > 1:
+                    children.append(BrowseMedia(
+                        media_class=MediaType.MUSIC,
+                        media_content_id=f"server_page_up:{media_content_id}",
+                        media_content_type="info",
+                        title="⬆️ Previous Page",
+                        can_play=False,
+                        can_expand=True,
+                        thumbnail=None,
+                    ))
+                
+                # Add "Next Page" if not on last page
+                if current_line + 7 < max_line:  # 8 items per page, so +7 from current
+                    children.append(BrowseMedia(
+                        media_class=MediaType.MUSIC,
+                        media_content_id=f"server_page_down:{media_content_id}",
+                        media_content_type="info",
+                        title="⬇️ Next Page",
+                        can_play=False,
+                        can_expand=True,
+                        thumbnail=None,
+                    ))
+                
+                # Add page info
+                current_page = (current_line - 1) // 8 + 1
+                total_pages = (max_line - 1) // 8 + 1
+                children.append(BrowseMedia(
+                    media_class=MediaType.MUSIC,
+                    media_content_id="page_info",
+                    media_content_type="info",
+                    title=f"📄 Page {current_page} of {total_pages} ({max_line} items)",
+                    can_play=False,
+                    can_expand=False,
+                    thumbnail=None,
+                ))
+
+            # Add back navigation if not at root level
+            if menu_layer > 1:
+                # Create parent path by removing last element
+                parent_parts = parts[2:-1] if len(parts) > 3 else []
+                parent_path = ":".join(parent_parts)
+                back_id = f"server_menu:root:{parent_path}" if parent_path else "server_root"
+                
+                children.insert(0, BrowseMedia(
+                    media_class=MediaType.MUSIC,
+                    media_content_id=back_id,
+                    media_content_type="folder",
+                    title="🔙 Back",
+                    can_play=False,
+                    can_expand=True,
+                    thumbnail=None,
+                ))
+            
+            result = BrowseMedia(
+                media_class=MediaType.MUSIC,
+                media_content_id=media_content_id,
+                media_content_type="folder",
+                title=menu_name,
+                can_play=False,
+                can_expand=True,
+                children=children,
+                thumbnail=None,
+            )
+            _LOGGER.debug(f"_get_current_server_list returning BrowseMedia with {len(children)} children")
+            return result
+            
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response in get current server list: %s", e)
+            return None
+        except Exception as e:
+            _LOGGER.error("Unexpected error in _get_current_server_list: %s", e)
+            return None
 
     async def _reset_server_to_root(self):
         """Reset SERVER navigation to root level"""
