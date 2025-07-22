@@ -94,13 +94,30 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 
 ## Recent Updates
 
+### Version 1.4.1 - Code Refactoring and Cleanup
+- **IMPROVED**: Major code quality improvements with ~250 fewer lines
+- **REFACTORED**: Eliminated duplicate XML parsing logic (saved ~135 lines)
+- **REFACTORED**: Added helper methods for pagination and navigation controls
+- **REFACTORED**: Created factory methods for cleaner BrowseMedia object creation
+- **CLEANED**: Removed redundant debug logging for better performance
+- **TECHNICAL**: Simplified navigation path management system
+- **TECHNICAL**: Better code organization and maintainability
+
+### Version 1.4.0 - SERVER Media Browsing Release
+- **NEW**: Full SERVER media browsing support with folder navigation
+- **NEW**: Pagination controls for large media libraries  
+- **NEW**: Back navigation and breadcrumb support
+- **IMPROVED**: Enhanced media metadata display for SERVER content
+- **IMPROVED**: Better error handling for network timeouts
+- **TECHNICAL**: Modernized code for Home Assistant 2025.x compatibility
+
 ### Version 1.3.0
-- 🎛️ **IP Address Management**: Change receiver IP address through Home Assistant UI without removing/re-adding integration
-- 🏷️ **Unique Entity ID**: Added unique_id property for full UI management support
-- 🎵 **Enhanced TUNER Controls**: Preset navigation buttons now work even when frequency is not locked (weak signals)
-- ⚡ **Performance Improvements**: Eliminated duplicate API calls and optimized preset detection
-- 🔧 **Code Modernization**: Removed deprecated config_entry assignment warnings for Home Assistant 2025.12+ compatibility
-- 🧹 **Code Cleanup**: Streamlined codebase with better error handling and reduced logging overhead
+- **IP Address Management**: Change receiver IP address through Home Assistant UI without removing/re-adding integration
+- **Unique Entity ID**: Added unique_id property for full UI management support
+- **Enhanced TUNER Controls**: Preset navigation buttons now work even when frequency is not locked (weak signals)
+- **Performance Improvements**: Eliminated duplicate API calls and optimized preset detection
+- **Code Modernization**: Removed deprecated config_entry assignment warnings for Home Assistant 2025.12+ compatibility
+- **Code Cleanup**: Streamlined codebase with better error handling and reduced logging overhead
 
 ### Version 1.2.1
 - 🐛 **Bug Fix**: Fixed volume control mapping between Home Assistant and receiver
