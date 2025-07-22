@@ -46,6 +46,11 @@ SUPPORT_TUNER = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.V
 SUPPORT_NET_RADIO = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
                     MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA
 
+SUPPORT_SERVER = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
+                 MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.BROWSE_MEDIA | \
+                 MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE | MediaPlayerEntityFeature.STOP | \
+                 MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK | MediaPlayerEntityFeature.SHUFFLE_SET
+
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     vol.Required(CONF_HOST): cv.string
@@ -110,6 +115,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._media_playback_state = None
         self._session = None
         self._current_preset = None
+        self._server_navigation_path = []  # Track SERVER navigation path
         _LOGGER.debug("YamahaRn301MP initialized")
 
     async def async_update(self) -> None:
@@ -148,6 +154,8 @@ class YamahaRn301MP(MediaPlayerEntity):
             return SUPPORT_TUNER
         elif self._source == "Net Radio":
             return SUPPORT_NET_RADIO
+        elif self._source == "Server":
+            return SUPPORT_SERVER
         elif self._source in ("Optical", "CD", "Line 1", "Line 2", "Line 3"):
             return SUPPORTED_PLAYBACK
         return SUPPORT_YAMAHA
@@ -287,12 +295,18 @@ class YamahaRn301MP(MediaPlayerEntity):
             await self._media_play_control("Skip Rev")
 
     async def async_play_media(self, media_type, media_id, **kwargs):
-        """Play media - for TUNER presets and NET RADIO stations"""
+        """Play media - for TUNER presets, NET RADIO stations, and SERVER tracks"""
         if self._source == "Tuner" and media_type == "preset":
             await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{media_id}</Preset_Sel></Preset></Play_Control></Tuner>')
         elif self._source == "Net Radio" and media_type == "station":
             # Navigate to the station and play it
             await self._navigate_and_play_station(media_id)
+        elif self._source == "Server" and media_type == "music":
+            # Navigate to the track and play it
+            await self._navigate_and_play_track(media_id)
+        elif self._source == "Server" and media_type == "info":
+            # Ignore info type media (like "No servers available")
+            _LOGGER.debug("Ignoring info type media for SERVER source")
         else:
             _LOGGER.warning("Play media not supported for source %s with type %s", self._source, media_type)
 
@@ -462,19 +476,30 @@ class YamahaRn301MP(MediaPlayerEntity):
             _LOGGER.warning("Error switching to previous preset: %s", e)
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
-        """Browse NET RADIO stations"""
-        if self._source != "Net Radio":
-            return None
-        
-        try:
-            if media_content_id is None:
-                # Root level - show main menu
-                return await self._browse_net_radio_root()
-            else:
-                # Browse specific menu item
-                return await self._browse_net_radio_item(media_content_id)
-        except Exception as e:
-            _LOGGER.exception("Error browsing media: %s", e)
+        """Browse NET RADIO stations and SERVER media"""
+        if self._source == "Net Radio":
+            try:
+                if media_content_id is None:
+                    # Root level - show main menu
+                    return await self._browse_net_radio_root()
+                else:
+                    # Browse specific menu item
+                    return await self._browse_net_radio_item(media_content_id)
+            except Exception as e:
+                _LOGGER.exception("Error browsing NET RADIO media: %s", e)
+                return None
+        elif self._source == "Server":
+            try:
+                if media_content_id is None or media_content_id == "server_root":
+                    # Root level - show server selection
+                    return await self._browse_server_root()
+                else:
+                    # Browse specific server item
+                    return await self._browse_server_item(media_content_id)
+            except Exception as e:
+                _LOGGER.exception("Error browsing SERVER media: %s", e)
+                return None
+        else:
             return None
 
     async def _browse_net_radio_root(self):
@@ -619,3 +644,264 @@ class YamahaRn301MP(MediaPlayerEntity):
         
         # Start playing
         await self._do_api_put('<NET_RADIO><Play_Control><Playback>Play</Playback></Play_Control></NET_RADIO>')
+
+    async def _navigate_and_play_track(self, media_id):
+        """Navigate to and play a SERVER track"""
+        if not media_id.startswith("server_track:"):
+            return
+        
+        # Parse the path: server_track:root:Line_1:Line_2:Line_3
+        parts = media_id.split(":")
+        if len(parts) < 3:
+            return
+        
+        path_parts = parts[2:]  # Skip 'server_track' and 'root'
+        
+        # Reset to root first
+        await self._reset_server_to_root()
+        
+        # Navigate through the path to reach the track
+        for step in path_parts:
+            await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{step}</Direct_Sel></List_Control></SERVER>')
+            # Wait a bit for navigation to complete
+            await asyncio.sleep(0.5)
+        
+        # Start playing
+        await self._do_api_put('<SERVER><Play_Control><Playback>Play</Playback></Play_Control></SERVER>')
+
+    async def _browse_server_root(self):
+        """Browse SERVER root menu (server selection)"""
+        # Reset to root level first
+        await self._reset_server_to_root()
+        
+        # Get current server list
+        data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
+        if not data:
+            _LOGGER.warning("No data received from SERVER browse")
+            return None
+        
+        try:
+            tree = ET.fromstring(data)
+            children = []
+            menu_name = "Media Server"
+            
+            for node in tree[0][0]:
+                if node.tag == "Menu_Name":
+                    menu_name = node.text or "Media Server"
+                elif node.tag == "Current_List":
+                    for line in node:
+                        if line.tag.startswith("Line_"):
+                            txt_node = line.find("Txt")
+                            attr_node = line.find("Attribute")
+                            
+                            if txt_node is not None and attr_node is not None and txt_node.text:
+                                title = txt_node.text
+                                attr = attr_node.text
+                                
+                                if attr == "Container":
+                                    children.append(BrowseMedia(
+                                        title=title,
+                                        media_class=MediaType.MUSIC,
+                                        media_content_id=f"server_menu:root:{line.tag}",
+                                        media_content_type="folder",
+                                        can_play=False,
+                                        can_expand=True,
+                                        thumbnail=None,
+                                    ))
+            
+            if not children:
+                children.append(BrowseMedia(
+                    title="No servers available",
+                    media_class=MediaType.MUSIC,
+                    media_content_id="empty",
+                    media_content_type="info",
+                    can_play=False,
+                    can_expand=False,
+                    thumbnail=None,
+                ))
+            
+            return BrowseMedia(
+                title=menu_name,
+                media_class=MediaType.MUSIC,
+                media_content_id="server_root",
+                media_content_type="folder",
+                can_play=False,
+                can_expand=True,
+                children=children,
+                thumbnail=None,
+            )
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response in server browse: %s", e)
+            return None
+
+    async def _browse_server_item(self, media_content_id):
+        """Browse specific SERVER menu item (folders/albums/tracks)"""
+        if not media_content_id.startswith("server_menu:"):
+            return await self._browse_server_back(media_content_id)
+        
+        # Parse the path: server_menu:root:Line_1 or server_menu:root:Line_1:Line_2:...
+        parts = media_content_id.split(":")
+        if len(parts) < 3:
+            return None
+        
+        path_parts = parts[2:]  # Skip 'server_menu' and 'root'
+        
+        # IMPORTANT: Always reset to root first to ensure consistency
+        await self._reset_server_to_root()
+        
+        # Navigate through the path step by step
+        for step in path_parts:
+            await self._do_api_put(f'<SERVER><List_Control><Direct_Sel>{step}</Direct_Sel></List_Control></SERVER>')
+            # Wait a bit for navigation to complete
+            await asyncio.sleep(0.5)
+        
+        # Get the final list after navigation - with retry for Busy status
+        data = None
+        for attempt in range(5):  # Max 5 attempts
+            data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
+            if data and 'Menu_Status>Busy<' not in data:
+                break
+            await asyncio.sleep(0.5)
+        
+        if not data:
+            return None
+        
+        try:
+            tree = ET.fromstring(data)
+            children = []
+            menu_name = "Server"
+            menu_layer = 1
+            
+            # Reconstruct current path from media_content_id
+            current_path = ":".join(parts[2:])  # parts from earlier
+            
+            for node in tree[0][0]:
+                if node.tag == "Menu_Name":
+                    menu_name = node.text or "Server"
+                elif node.tag == "Menu_Layer":
+                    menu_layer = int(node.text) if node.text else 1
+                elif node.tag == "Current_List":
+                    for line in node:
+                        if line.tag.startswith("Line_"):
+                            txt_node = line.find("Txt")
+                            attr_node = line.find("Attribute")
+                            
+                            if txt_node is not None and attr_node is not None and txt_node.text:
+                                title = txt_node.text
+                                attr = attr_node.text
+                                
+                                if attr == "Container":
+                                    # Folder/Album - extend current path
+                                    new_path = f"{current_path}:{line.tag}" if current_path else line.tag
+                                    children.append(BrowseMedia(
+                                        title=title,
+                                        media_class=MediaType.MUSIC,
+                                        media_content_id=f"server_menu:root:{new_path}",
+                                        media_content_type="album" if menu_layer > 4 else "folder",
+                                        can_play=False,
+                                        can_expand=True,
+                                        thumbnail=None,
+                                    ))
+                                elif attr == "Item":
+                                    # Track/File - use current path for context
+                                    track_path = f"{current_path}:{line.tag}" if current_path else line.tag
+                                    children.append(BrowseMedia(
+                                        title=title,
+                                        media_class=MediaType.TRACK,
+                                        media_content_id=f"server_track:root:{track_path}",
+                                        media_content_type="music",
+                                        can_play=True,
+                                        can_expand=False,
+                                        thumbnail=None,
+                                    ))
+            
+            # Add back navigation if not at root level
+            if menu_layer > 1:
+                # Create parent path by removing last element
+                parent_parts = parts[2:-1] if len(parts) > 3 else []
+                parent_path = ":".join(parent_parts)
+                back_id = f"server_menu:root:{parent_path}" if parent_path else "server_root"
+                
+                children.insert(0, BrowseMedia(
+                    title=".. (Back)",
+                    media_class=MediaType.MUSIC,
+                    media_content_id=back_id,
+                    media_content_type="folder",
+                    can_play=False,
+                    can_expand=True,
+                    thumbnail=None,
+                ))
+            
+            return BrowseMedia(
+                title=menu_name,
+                media_class=MediaType.MUSIC,
+                media_content_id=media_content_id,
+                media_content_type="folder",
+                can_play=False,
+                can_expand=True,
+                children=children,
+                thumbnail=None,
+            )
+        except ET.ParseError as e:
+            _LOGGER.error("Failed to parse XML response in server browse item: %s", e)
+            return None
+
+    async def _browse_server_back(self, media_content_id):
+        """Handle SERVER back navigation"""
+        if media_content_id.startswith("server_back:"):
+            # Navigate back using Return command
+            await self._do_api_put('<SERVER><List_Control><Cursor>Return</Cursor></List_Control></SERVER>')
+            
+            # Get the current list after going back
+            data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
+            if not data:
+                return None
+            
+            try:
+                tree = ET.fromstring(data)
+                menu_layer = 1
+                
+                # Check menu layer to determine content ID format
+                for node in tree[0][0]:
+                    if node.tag == "Menu_Layer":
+                        menu_layer = int(node.text) if node.text else 1
+                        break
+                
+                # Return browse result for the new level
+                if menu_layer == 1:
+                    return await self._browse_server_root()
+                else:
+                    return await self._browse_server_item("server_menu:current")
+                    
+            except ET.ParseError as e:
+                _LOGGER.error("Failed to parse XML response in server back navigation: %s", e)
+                return None
+        
+        return None
+
+    async def _reset_server_to_root(self):
+        """Reset SERVER navigation to root level"""
+        data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
+        if data:
+            try:
+                tree = ET.fromstring(data)
+                menu_layer = 1
+                for node in tree[0][0]:
+                    if node.tag == "Menu_Layer":
+                        menu_layer = int(node.text) if node.text else 1
+                        break
+                
+                # Navigate back to root level if not already there
+                while menu_layer > 1:
+                    await self._do_api_put('<SERVER><List_Control><Cursor>Return</Cursor></List_Control></SERVER>')
+                    data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
+                    if not data:
+                        break
+                    tree = ET.fromstring(data)
+                    menu_layer = 1
+                    for node in tree[0][0]:
+                        if node.tag == "Menu_Layer":
+                            menu_layer = int(node.text) if node.text else 1
+                            break
+            except ET.ParseError:
+                pass
