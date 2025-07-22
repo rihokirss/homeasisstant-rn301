@@ -264,13 +264,28 @@ The SERVER input provides DLNA/UPnP media browsing capabilities with a hierarchi
 
 The SERVER browsing follows a hierarchical structure:
 
-| Layer | Content Type | Example | Attribute |
-|-------|-------------|---------|-----------|
-| 1 | Media Servers | "ketas", "NAS" | Container |
-| 2 | Media Types | "Music", "Photo", "Video" | Container |
-| 3 | Categories | "By Artist", "By Album", "Playlist" | Container |
-| 4 | Collections | Artist names, Album names | Container |
-| 5+ | Items/Tracks | Song titles, File names | Item |
+| Layer | Content Type | Example | Attribute | Notes |
+|-------|-------------|---------|-----------|--------|
+| 1 | Media Servers | "ketas", "NAS" | Container | Root level servers |
+| 2 | Media Types | "Music", "Photo", "Video" | Container | Content categories |
+| 3 | Categories | "By Artist", "By Album", "Playlist" | Container | Organization methods |
+| 4 | Collections | Artist names, Album names | Container | Content collections |
+| 5+ | Items/Tracks | Song titles, File names | Item | Playable content |
+
+**Special Attributes:**
+- `Container` - Navigable folders/categories
+- `Item` - Playable tracks/files  
+- `Unselectable` - Empty list items (display padding)
+
+**Example Layer 3 Categories:**
+- `By Folder` - File system structure browsing
+- `All music` - All tracks in flat view
+- `Playlist` - User-created playlists
+- `Smart Playlist` - Auto-generated playlists
+- `By Album` - Browse by album collections
+- `By Artist` - Browse by artist collections
+- `By Genre` - Browse by music genre
+- `Artist/Album` - Combined artist/album view
 
 ### Navigation Commands
 
@@ -340,6 +355,44 @@ The SERVER browsing follows a hierarchical structure:
 </YAMAHA_AV>
 ```
 
+**Response Structure:**
+```xml
+<YAMAHA_AV rsp="GET" RC="0">
+  <NET_RADIO>
+    <List_Info>
+      <Menu_Status>Ready</Menu_Status>
+      <Menu_Layer>1</Menu_Layer>
+      <Menu_Name>NET RADIO</Menu_Name>
+      <Current_List>
+        <Line_1>
+          <Txt>Bookmarks</Txt>
+          <Attribute>Container</Attribute>
+        </Line_1>
+        <Line_2>
+          <Txt>Locations</Txt>
+          <Attribute>Container</Attribute>
+        </Line_2>
+        <!-- More Line_X entries -->
+      </Current_List>
+      <Cursor_Position>
+        <Current_Line>1</Current_Line>
+        <Max_Line>8</Max_Line>
+      </Cursor_Position>
+    </List_Info>
+  </NET_RADIO>
+</YAMAHA_AV>
+```
+
+**NET RADIO Categories:**
+- `Bookmarks` - Saved favorite stations
+- `Locations` - Stations by geographic location
+- `Genres` - Stations categorized by music genre
+- `New Stations` - Recently added stations
+- `Popular Stations` - Most listened stations
+- `Podcasts` - Podcast content
+- `Help` - Help and information
+- `Get Access Code` - Account management
+
 ### Navigate and Play Station
 ```xml
 <!-- Select Station -->
@@ -400,6 +453,26 @@ TUNER information is available in the main Play_Info response:
 - `RC="1"` - General error
 - `RC="2"` - Invalid parameter
 - `RC="3"` - Operation not available
+- `RC="4"` - Access denied
+- `RC="5"` - Parameter out of range
+
+### Empty Responses
+Some requests may return minimal responses when no data is available or the operation only confirms success:
+
+```xml
+<YAMAHA_AV rsp="PUT" RC="0">
+  <Main_Zone>
+    <Input>
+      <Input_Sel></Input_Sel>
+    </Input>
+  </Main_Zone>
+</YAMAHA_AV>
+```
+
+This typically occurs with:
+- Input switching commands
+- Volume/power changes
+- Playback control commands
 
 ### Busy Status
 When navigating SERVER or NET_RADIO, check for busy status:
@@ -413,6 +486,97 @@ Wait and retry when busy status is detected.
 - Use reasonable timeouts (2-5 seconds) for HTTP requests
 - Implement retry logic for temporary failures
 - Add delays between rapid API calls (200-500ms)
+
+## Real Response Examples
+
+### SERVER List Response (Layer 3 - Music Categories)
+```xml
+<YAMAHA_AV rsp="GET" RC="0">
+  <SERVER>
+    <List_Info>
+      <Menu_Status>Ready</Menu_Status>
+      <Menu_Layer>3</Menu_Layer>
+      <Menu_Name>Music</Menu_Name>
+      <Current_List>
+        <Line_1><Txt>By Folder</Txt><Attribute>Container</Attribute></Line_1>
+        <Line_2><Txt>All music</Txt><Attribute>Container</Attribute></Line_2>
+        <Line_3><Txt>Playlist</Txt><Attribute>Container</Attribute></Line_3>
+        <Line_4><Txt>Smart Playlist</Txt><Attribute>Container</Attribute></Line_4>
+        <Line_5><Txt>By Album</Txt><Attribute>Container</Attribute></Line_5>
+        <Line_6><Txt>By Artist</Txt><Attribute>Container</Attribute></Line_6>
+        <Line_7><Txt>By Genre</Txt><Attribute>Container</Attribute></Line_7>
+        <Line_8><Txt>Artist/Album</Txt><Attribute>Container</Attribute></Line_8>
+      </Current_List>
+      <Cursor_Position>
+        <Current_Line>5</Current_Line>
+        <Max_Line>10</Max_Line>
+      </Cursor_Position>
+    </List_Info>
+  </SERVER>
+</YAMAHA_AV>
+```
+
+### NET RADIO Root Response
+```xml
+<YAMAHA_AV rsp="GET" RC="0">
+  <NET_RADIO>
+    <List_Info>
+      <Menu_Status>Ready</Menu_Status>
+      <Menu_Layer>1</Menu_Layer>
+      <Menu_Name>NET RADIO</Menu_Name>
+      <Current_List>
+        <Line_1><Txt>Bookmarks</Txt><Attribute>Container</Attribute></Line_1>
+        <Line_2><Txt>Locations</Txt><Attribute>Container</Attribute></Line_2>
+        <Line_3><Txt>Genres</Txt><Attribute>Container</Attribute></Line_3>
+        <Line_4><Txt>New Stations</Txt><Attribute>Container</Attribute></Line_4>
+        <Line_5><Txt>Popular Stations</Txt><Attribute>Container</Attribute></Line_5>
+        <Line_6><Txt>Podcasts</Txt><Attribute>Container</Attribute></Line_6>
+        <Line_7><Txt>Help</Txt><Attribute>Container</Attribute></Line_7>
+        <Line_8><Txt>Get Access Code</Txt><Attribute>Container</Attribute></Line_8>
+      </Current_List>
+      <Cursor_Position>
+        <Current_Line>1</Current_Line>
+        <Max_Line>8</Max_Line>
+      </Cursor_Position>
+    </List_Info>
+  </NET_RADIO>
+</YAMAHA_AV>
+```
+
+### Basic Status Response
+```xml
+<YAMAHA_AV rsp="GET" RC="0">
+  <Main_Zone>
+    <Basic_Status>
+      <Power_Control>
+        <Power>On</Power>
+      </Power_Control>
+      <Volume>
+        <Lvl>
+          <Val>25</Val>
+          <Exp>0</Exp>
+          <Unit></Unit>
+        </Lvl>
+        <Mute>Off</Mute>
+      </Volume>
+      <Input>
+        <Input_Sel>NET RADIO</Input_Sel>
+        <Input_Sel_Item_Info>
+          <Param>NET RADIO</Param>
+          <RW>RW</RW>
+          <Title></Title>
+          <Icon>
+            <On>/YamahaRemoteControl/Icons/icon067.png</On>
+            <Off></Off>
+          </Icon>
+          <Src_Name>NET_RADIO</Src_Name>
+          <Src_Number>1</Src_Number>
+        </Input_Sel_Item_Info>
+      </Input>
+    </Basic_Status>
+  </Main_Zone>
+</YAMAHA_AV>
+```
 
 ## Examples
 
