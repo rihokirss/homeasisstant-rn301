@@ -823,8 +823,8 @@ class YamahaRn301MP(MediaPlayerEntity):
                 back_id = f"server_menu:root:{parent_path}" if parent_path else "server_root"
                 
                 children.insert(0, BrowseMedia(
-                    title=".. (Back)",
-                    media_class=MediaType.MUSIC,
+                    title="🔙 Back",
+                    media_class=MediaType.FOLDER,
                     media_content_id=back_id,
                     media_content_type="folder",
                     can_play=False,
