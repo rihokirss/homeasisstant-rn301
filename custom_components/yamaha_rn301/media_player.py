@@ -12,7 +12,7 @@ from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
 
 from homeassistant.components.media_player.const import (
-    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType)
+    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType, MediaClass)
 try:
     from homeassistant.components.media_player.browse_media import BrowseMedia
 except ImportError:
@@ -526,7 +526,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                 
                                 if title and attr == "Container":
                                     children.append(BrowseMedia(
-                                        media_class=MediaType.CHANNEL,
+                                        media_class=MediaClass.DIRECTORY,
                                         media_content_id=f"menu:{line.tag}",
                                         media_content_type="folder",
                                         title=title,
@@ -537,14 +537,14 @@ class YamahaRn301MP(MediaPlayerEntity):
             if not children:
                 _LOGGER.warning("No browsable items found in NET RADIO menu")
                 return BrowseMedia(
-                    media_class=MediaType.CHANNEL,
+                    media_class=MediaClass.DIRECTORY,
                     media_content_id="root",
                     media_content_type="folder",
                     title="NET RADIO",
                     can_play=False,
                     can_expand=False,
                     children=[BrowseMedia(
-                        media_class=MediaType.CHANNEL,
+                        media_class=MediaClass.DIRECTORY,
                         media_content_id="empty",
                         media_content_type="info",
                         title="No stations available",
@@ -554,7 +554,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                 )
             
             return BrowseMedia(
-                media_class=MediaType.CHANNEL,
+                media_class=MediaClass.DIRECTORY,
                 media_content_id="root",
                 media_content_type="folder",
                 title="NET RADIO",
@@ -602,7 +602,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                 if title:
                                     if attr == "Container":
                                         children.append(BrowseMedia(
-                                            media_class=MediaType.CHANNEL,
+                                            media_class=MediaClass.DIRECTORY,
                                             media_content_id=f"menu:{line.tag}",
                                             media_content_type="folder",
                                             title=title,
@@ -611,7 +611,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                         ))
                                     elif attr == "Item":
                                         children.append(BrowseMedia(
-                                            media_class=MediaType.CHANNEL,
+                                            media_class=MediaClass.TRACK,
                                             media_content_id=f"station:{line.tag}",
                                             media_content_type="station",
                                             title=title,
@@ -620,7 +620,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                         ))
             
             return BrowseMedia(
-                media_class=MediaType.CHANNEL,
+                media_class=MediaClass.DIRECTORY,
                 media_content_id=media_content_id,
                 media_content_type="folder",
                 title=menu_name,
@@ -756,9 +756,11 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     def _create_folder_browse_media(self, title, content_id, media_type="folder"):
         """Create BrowseMedia object for folders/containers"""
+        # Use ALBUM for album-level containers, DIRECTORY for other folders
+        media_class = MediaClass.ALBUM if media_type == "album" else MediaClass.DIRECTORY
         return BrowseMedia(
             title=title,
-            media_class=MediaType.MUSIC,
+            media_class=media_class,
             media_content_id=content_id,
             media_content_type=media_type,
             can_play=False,
@@ -770,7 +772,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         """Create BrowseMedia object for tracks"""
         return BrowseMedia(
             title=title,
-            media_class=MediaType.TRACK,
+            media_class=MediaClass.TRACK,
             media_content_id=content_id,
             media_content_type="music",
             can_play=True,
@@ -784,7 +786,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             # Add "Previous Page" if not on first page
             if current_line > 1:
                 children.append(BrowseMedia(
-                    media_class=MediaType.MUSIC,
+                    media_class=MediaClass.DIRECTORY,
                     media_content_id=f"server_page_up:{base_content_id}",
                     media_content_type="info",
                     title="⬆️ Previous Page",
@@ -796,7 +798,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             # Add "Next Page" if not on last page
             if current_line + 7 < max_line:
                 children.append(BrowseMedia(
-                    media_class=MediaType.MUSIC,
+                    media_class=MediaClass.DIRECTORY,
                     media_content_id=f"server_page_down:{base_content_id}",
                     media_content_type="info",
                     title="⬇️ Next Page",
@@ -809,7 +811,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             current_page = (current_line - 1) // 8 + 1
             total_pages = (max_line - 1) // 8 + 1
             children.append(BrowseMedia(
-                media_class=MediaType.MUSIC,
+                media_class=MediaClass.DIRECTORY,
                 media_content_id="page_info",
                 media_content_type="info",
                 title=f"📄 Page {current_page} of {total_pages} ({max_line} items)",
@@ -827,7 +829,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             back_id = f"server_menu:root:{parent_path}" if parent_path else "server_root"
             
             children.insert(0, BrowseMedia(
-                media_class=MediaType.MUSIC,
+                media_class=MediaClass.DIRECTORY,
                 media_content_id=back_id,
                 media_content_type="folder",
                 title="🔙 Back",
@@ -854,7 +856,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         
         if not children:
             children.append(BrowseMedia(
-                media_class=MediaType.MUSIC,
+                media_class=MediaClass.DIRECTORY,
                 media_content_id="empty",
                 media_content_type="info",
                 title="No servers available",
@@ -863,7 +865,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             ))
         
         return BrowseMedia(
-            media_class=MediaType.MUSIC,
+            media_class=MediaClass.DIRECTORY,
             media_content_id="server_root",
             media_content_type="folder",
             title=parsed_data['menu_name'],
@@ -924,7 +926,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._add_back_navigation(children, parsed_data['menu_layer'], parts)
 
         return BrowseMedia(
-            media_class=MediaType.MUSIC,
+            media_class=MediaClass.DIRECTORY,
             media_content_id=media_content_id,
             media_content_type="folder",
             title=parsed_data['menu_name'],
@@ -1026,7 +1028,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._add_back_navigation(children, parsed_data['menu_layer'], parts)
         
         return BrowseMedia(
-            media_class=MediaType.MUSIC,
+            media_class=MediaClass.DIRECTORY,
             media_content_id=media_content_id,
             media_content_type="folder",
             title=parsed_data['menu_name'],
