@@ -13,7 +13,10 @@ from homeassistant.components.media_player import (
 
 from homeassistant.components.media_player.const import (
     ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType)
-from homeassistant.components.media_player.browse_media import BrowseMedia
+try:
+    from homeassistant.components.media_player.browse_media import BrowseMedia
+except ImportError:
+    from homeassistant.components.media_player import BrowseMedia
 from homeassistant.components.media_player import (
     MediaPlayerEntityFeature)
 from homeassistant.const import (
@@ -529,6 +532,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                     children.append(BrowseMedia(
                                         media_class=MediaType.CHANNEL,
                                         media_content_id=f"menu:{line.tag}",
+                                        media_content_type="folder",
                                         title=title,
                                         can_play=False,
                                         can_expand=True,
@@ -539,12 +543,14 @@ class YamahaRn301MP(MediaPlayerEntity):
                 return BrowseMedia(
                     media_class=MediaType.CHANNEL,
                     media_content_id="root",
+                    media_content_type="folder",
                     title="NET RADIO",
                     can_play=False,
                     can_expand=False,
                     children=[BrowseMedia(
                         media_class=MediaType.CHANNEL,
                         media_content_id="empty",
+                        media_content_type="info",
                         title="No stations available",
                         can_play=False,
                         can_expand=False,
@@ -554,6 +560,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             return BrowseMedia(
                 media_class=MediaType.CHANNEL,
                 media_content_id="root",
+                media_content_type="folder",
                 title="NET RADIO",
                 can_play=False,
                 can_expand=True,
@@ -601,6 +608,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                         children.append(BrowseMedia(
                                             media_class=MediaType.CHANNEL,
                                             media_content_id=f"menu:{line.tag}",
+                                            media_content_type="folder",
                                             title=title,
                                             can_play=False,
                                             can_expand=True,
@@ -609,6 +617,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                         children.append(BrowseMedia(
                                             media_class=MediaType.CHANNEL,
                                             media_content_id=f"station:{line.tag}",
+                                            media_content_type="station",
                                             title=title,
                                             can_play=True,
                                             can_expand=False,
@@ -617,6 +626,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             return BrowseMedia(
                 media_class=MediaType.CHANNEL,
                 media_content_id=media_content_id,
+                media_content_type="folder",
                 title=menu_name,
                 can_play=False,
                 can_expand=True,
@@ -695,9 +705,10 @@ class YamahaRn301MP(MediaPlayerEntity):
                                 
                                 if attr == "Container":
                                     children.append(BrowseMedia(
+                                        title=title,
                                         media_class=MediaType.MUSIC,
                                         media_content_id=f"server_menu:root:{line.tag}",
-                                        title=title,
+                                        media_content_type="folder",
                                         can_play=False,
                                         can_expand=True,
                                     ))
@@ -706,6 +717,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                 children.append(BrowseMedia(
                     media_class=MediaType.MUSIC,
                     media_content_id="empty",
+                    media_content_type="info",
                     title="No servers available",
                     can_play=False,
                     can_expand=False,
@@ -714,6 +726,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             return BrowseMedia(
                 media_class=MediaType.MUSIC,
                 media_content_id="server_root",
+                media_content_type="folder",
                 title=menu_name,
                 can_play=False,
                 can_expand=True,
@@ -786,6 +799,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                     children.append(BrowseMedia(
                                         media_class=MediaType.MUSIC,
                                         media_content_id=f"server_menu:root:{new_path}",
+                                        media_content_type="album" if menu_layer > 4 else "folder",
                                         title=title,
                                         can_play=False,
                                         can_expand=True,
@@ -796,6 +810,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                                     children.append(BrowseMedia(
                                         media_class=MediaType.TRACK,
                                         media_content_id=f"server_track:root:{track_path}",
+                                        media_content_type="music",
                                         title=title,
                                         can_play=True,
                                         can_expand=False,
@@ -811,6 +826,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                 children.insert(0, BrowseMedia(
                     media_class=MediaType.MUSIC,
                     media_content_id=back_id,
+                    media_content_type="folder",
                     title="🔙 Back",
                     can_play=False,
                     can_expand=True,
@@ -819,6 +835,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             return BrowseMedia(
                 media_class=MediaType.MUSIC,
                 media_content_id=media_content_id,
+                media_content_type="folder",
                 title=menu_name,
                 can_play=False,
                 can_expand=True,
