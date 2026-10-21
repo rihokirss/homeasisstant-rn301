@@ -492,3 +492,18 @@ async def test_opening_a_subfolder_steps_down(hass, hass_ws_client, receiver, co
     assert genre["result"]["title"] == "Genre 10"
     # Selected in the list shown, without walking from the root again
     assert not [put for put in receiver.puts if "Return" in put]
+
+
+async def test_opening_a_subfolder_while_parent_is_read_steps_down(hass, hass_ws_client, receiver, config_entry, monkeypatch):
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.LIST_FIRST_VIEW_BUDGET", 0)
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    receiver.busy_polls = 2
+    # The rest of Genres is being read in the background
+    genres = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_1"))
+    receiver.puts.clear()
+
+    genre = await _browse(hass, hass_ws_client, genres["Genre 3"])
+
+    assert genre["result"]["title"] == "Genre 3"
+    assert not [put for put in receiver.puts if "Return" in put]

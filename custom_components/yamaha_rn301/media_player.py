@@ -729,9 +729,12 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def _read_list_in_background(self, src, key, path):
         entry = self._list_cache[key]
+        moving = True
         try:
             async with self._list_lock:
                 await self._show_list(src, path)
+                # From here on the receiver stays in this list, only its page changes
+                moving = False
                 if entry['listing']['complete']:
                     # Read an old list again; it is shown until the new one is done
                     listing = await self._read_list(src)
@@ -739,8 +742,9 @@ class YamahaRn301MP(MediaPlayerEntity):
                     listing = await self._read_list(src, entry['listing'])
             self._store_list(key, listing)
         except asyncio.CancelledError:
-            # The receiver may have stopped anywhere on the way
-            self._list_paths.pop(src.tag, None)
+            if moving:
+                # The receiver may have stopped anywhere on the way
+                self._list_paths.pop(src.tag, None)
             if self._list_store is not None:
                 self._list_store.async_delay_save(lambda: self._list_cache, 10)
             raise
