@@ -63,9 +63,9 @@ Once installed and configured, the Yamaha R-N301 will appear as a media player e
 - Use the Lovelace UI to control power, volume, source selection, and media playback
 - Create automations and scripts using the media player services
 - Access different input sources with varying capabilities:
-  - **Full Control**: Spotify, Net Radio, Server (play/pause/stop/skip/shuffle)
+  - **Full Control**: Spotify, Net Radio, Server, AirPlay (play/pause/stop/skip/shuffle)
   - **TUNER Control**: Power, volume, source, preset switching via next/previous track buttons
-  - **Basic Control**: Optical, CD, Line inputs (power/volume/source only)
+  - **Basic Control**: Optical, Coaxial, CD, Line inputs (power/volume/source only)
 
 ## Configuration Options
 
@@ -93,6 +93,12 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **Network**: Receiver must be accessible via HTTP on your local network
 
 ## Recent Updates
+
+### Version 1.4.3 - AirPlay and Coaxial Inputs
+- **FIXED**: Added missing AirPlay and Coaxial inputs to the source mapping. Selecting either input previously raised a KeyError in the update loop, freezing the entity and logging "Error during update: 'AirPlay'" every poll (thanks @Neubda, #5)
+- **IMPROVED**: AirPlay now shows now-playing info and supports transport controls
+- **IMPROVED**: Coaxial is handled like the other passive inputs (Optical/CD/Line)
+- **ROBUSTNESS**: Unknown inputs reported by the receiver now fall back to their raw name instead of breaking updates
 
 ### Version 1.4.2 - Media Browsing Standards Compliance
 - **FIXED**: Updated media browsing to use MediaClass instead of MediaType for proper Home Assistant standards compliance
