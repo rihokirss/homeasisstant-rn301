@@ -35,8 +35,10 @@ BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 # Consecutive failed polls before the entity is reported unavailable; the
 # receiver occasionally misses a poll in standby
 MAX_FAILED_UPDATES = 3
-# Half-second polls while a NET RADIO or SERVER list is busy loading
-LIST_BUSY_RETRIES = 20
+# Polling while a NET RADIO or SERVER list is busy loading; a page takes
+# about half a second, a media server waking up several seconds
+LIST_BUSY_POLL_INTERVAL = 0.15
+LIST_BUSY_TIMEOUT = 10
 # Items read for one browse view; reading takes about half a second per 8
 LIST_MAX_ITEMS = 400
 # How long a list that was read stays valid for browsing
@@ -794,13 +796,14 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def _wait_for_list(self, src):
         """Return the current list once the receiver is no longer busy loading it."""
-        # A media server that has to wake up can stay busy for several seconds
-        for attempt in range(LIST_BUSY_RETRIES):
+        deadline = time.monotonic() + LIST_BUSY_TIMEOUT
+        while True:
             data = await self._do_api_get(f"<{src.tag}><List_Info>GetParam</List_Info></{src.tag}>")
             if data and 'Menu_Status>Busy<' not in data:
                 return data
-            await asyncio.sleep(0.5)
-        raise BrowseError("The receiver did not respond, try again")
+            if time.monotonic() >= deadline:
+                raise BrowseError("The receiver did not respond, try again")
+            await asyncio.sleep(LIST_BUSY_POLL_INTERVAL)
 
     async def _reset_list_to_root(self, src):
         """Return the menu to its root level"""
