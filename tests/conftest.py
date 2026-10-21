@@ -108,6 +108,10 @@ class FakeReceiver:
         page_start = (line - 1) // 8 * 8 + 1
         if (jump := control.findtext("Jump_Line")) is not None:
             stack[-1] = (node, int(jump))
+            self._busy_left = self.busy_polls
+        elif self._busy_left:
+            # Like the real receiver, ignore selections while loading a list
+            return
         elif (sel := control.findtext("Direct_Sel")) is not None:
             title, children = items[page_start + int(sel[5:]) - 2]
             if children is None:

@@ -778,8 +778,11 @@ class YamahaRn301MP(MediaPlayerEntity):
         """Select an item in the current list by its absolute line number."""
         number = int(line_id[5:])
         # Direct_Sel only addresses the 8 lines of the page shown, so first
-        # jump to the page that holds the item
+        # jump to the page that holds the item. The receiver is busy while it
+        # loads that page (about a second for NET RADIO) and ignores a
+        # selection until it is done.
         await self._do_api_put(f'<{src.tag}><List_Control><Jump_Line>{number}</Jump_Line></List_Control></{src.tag}>')
+        await self._wait_for_list(src)
         await self._do_api_put(f'<{src.tag}><List_Control><Direct_Sel>Line_{(number - 1) % 8 + 1}</Direct_Sel></List_Control></{src.tag}>')
 
     async def _wait_for_list(self, src):

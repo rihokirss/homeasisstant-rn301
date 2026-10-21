@@ -295,6 +295,8 @@ async def test_server_play_stored_track_from_other_menu(hass, hass_ws_client, re
 async def test_net_radio_browse(hass, hass_ws_client, receiver, config_entry):
     receiver.input = "NET RADIO"
     await setup_entry(hass, config_entry)
+    # YCast pages take a moment to load after each jump or selection
+    receiver.busy_polls = 2
     # The receiver is left deep in a station list
     receiver.lists["NET_RADIO"].append((NET_RADIO_TREE[1][0], 1))
 
@@ -329,6 +331,7 @@ async def test_net_radio_play_stored_station(hass, receiver, config_entry):
     """An automation plays a station ID saved earlier, with the menu elsewhere."""
     receiver.input = "NET RADIO"
     await setup_entry(hass, config_entry)
+    receiver.busy_polls = 2
 
     await _call(hass, "play_media", media_content_id="netradio_track:root:Line_1:Line_2:Line_1:Line_2",
                 media_content_type="channel")
