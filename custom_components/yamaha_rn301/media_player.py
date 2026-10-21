@@ -758,9 +758,17 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def _show_list(self, src, path):
         """Make the receiver show the list at path, walking there from the root if needed."""
         parsed = self._parse_list_info(await self._wait_for_list(src))
+        shown = self._list_paths.get(src.tag)
         # Walking the menu from the root is slow, so skip it when the list
-        # shown is the one browsed last (e.g. right after browsing in the UI)
-        if self._list_paths.get(src.tag) != (path, parsed['menu_name']) or parsed['menu_layer'] != len(path) + 1:
+        # shown is the one browsed last (e.g. right after browsing in the UI),
+        # or step down when it is the parent (opening a folder in it)
+        if shown == (path, parsed['menu_name']) and parsed['menu_layer'] == len(path) + 1:
+            pass
+        elif path and shown == (path[:-1], parsed['menu_name']) and parsed['menu_layer'] == len(path):
+            await self._select_list_line(src, path[-1])
+            await asyncio.sleep(0.5)
+            parsed = self._parse_list_info(await self._wait_for_list(src))
+        else:
             parsed = self._parse_list_info(await self._navigate_to_list_path(src, path))
         self._list_paths[src.tag] = (path, parsed['menu_name'])
 

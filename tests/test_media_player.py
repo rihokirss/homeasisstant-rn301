@@ -479,3 +479,16 @@ async def test_ignored_jump_is_sent_again(hass, hass_ws_client, receiver, config
     genres = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_1"))
 
     assert list(genres) == [f"Genre {i}" for i in range(1, 12)]
+
+
+async def test_opening_a_subfolder_steps_down(hass, hass_ws_client, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    genres = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_1"))
+    receiver.puts.clear()
+
+    genre = await _browse(hass, hass_ws_client, genres["Genre 10"])
+
+    assert genre["result"]["title"] == "Genre 10"
+    # Selected in the list shown, without walking from the root again
+    assert not [put for put in receiver.puts if "Return" in put]
