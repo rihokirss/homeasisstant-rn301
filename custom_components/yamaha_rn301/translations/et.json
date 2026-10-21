@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Yamaha R-N301",
+        "description": "Sisesta ressiiveri IP-aadress või hostinimi.",
+        "data": {
+          "host": "Host",
+          "name": "Nimi"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Ressiiveriga ei õnnestunud ühendust luua"
+    },
+    "abort": {
+      "already_configured": "See ressiiver on juba seadistatud"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Yamaha R-N301",
+        "data": {
+          "host": "Host",
+          "name": "Nimi"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Ressiiveriga ei õnnestunud ühendust luua",
+      "already_configured": "Seda hosti kasutab juba teine kirje"
+    }
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Yamaha R-N301",
+        "description": "Enter the IP address or hostname of the receiver.",
+        "data": {
+          "host": "Host",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the receiver"
+    },
+    "abort": {
+      "already_configured": "This receiver is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Yamaha R-N301",
+        "data": {
+          "host": "Host",
+          "name": "Name"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the receiver",
+      "already_configured": "Another entry already uses this host"
+    }
+  }
+}

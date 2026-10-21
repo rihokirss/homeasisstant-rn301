@@ -90,15 +90,15 @@ All responses follow this XML structure:
     <Volume>
       <Lvl>
         <Val>{volume}</Val>
-        <Exp>1</Exp>
-        <Unit>dB</Unit>
+        <Exp>0</Exp>
+        <Unit></Unit>
       </Lvl>
     </Volume>
   </Main_Zone>
 </YAMAHA_AV>
 ```
 
-Volume range: -80.5 to +16.5 dB (multiply by 10 for API values)
+Volume range: 0 to 100 (Home Assistant's 0.0–1.0 volume level multiplied by 100)
 
 #### Mute Control
 ```xml

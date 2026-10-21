@@ -11,8 +11,7 @@ import aiohttp
 from homeassistant.components.media_player import (
     MediaPlayerEntity, PLATFORM_SCHEMA)
 
-from homeassistant.components.media_player.const import (
-    ATTR_MEDIA_CONTENT_ID, ATTR_MEDIA_CONTENT_TYPE, MediaType, MediaClass)
+from homeassistant.components.media_player.const import MediaType, MediaClass
 try:
     from homeassistant.components.media_player.browse_media import BrowseMedia
 except ImportError:
@@ -20,28 +19,22 @@ except ImportError:
 from homeassistant.components.media_player import (
     MediaPlayerEntityFeature)
 from homeassistant.const import (
-    CONF_HOST, CONF_NAME, STATE_OFF, STATE_IDLE, STATE_PLAYING, STATE_UNKNOWN)
+    CONF_HOST, CONF_NAME, STATE_OFF, STATE_IDLE, STATE_PAUSED, STATE_PLAYING, STATE_UNKNOWN)
 
 import homeassistant.util.dt as dt_util
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-DOMAIN = 'yamaha_rn301'
+from .const import DEFAULT_NAME, DEFAULT_TIMEOUT
 
-ATTR_ENABLED = 'enabled'
-ATTR_PORT = 'port'
-DATA_YAMAHA = 'yamaha_known_receivers'
-DEFAULT_NAME = 'Yamaha R-N301'
-DEFAULT_TIMEOUT = 5
 BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 
-SERVICE_ENABLE_OUTPUT = 'yamaha_enable_output'
 SUPPORT_YAMAHA = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
                  MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE | MediaPlayerEntityFeature.STOP | \
                  MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK | MediaPlayerEntityFeature.SHUFFLE_SET
 
 SUPPORTED_PLAYBACK = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
-                     MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.SHUFFLE_SET
+                     MediaPlayerEntityFeature.SELECT_SOURCE
 
 SUPPORT_TUNER = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | \
                 MediaPlayerEntityFeature.SELECT_SOURCE | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK
@@ -84,48 +77,44 @@ async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the media player platform from a config entry."""
     host = entry.data[CONF_HOST]
     name = entry.data.get(CONF_NAME, DEFAULT_NAME)
-    player = YamahaRn301MP(name, host)
+    player = YamahaRn301MP(name, host, entry.entry_id)
     async_add_entities([player], True)
 
 class YamahaRn301MP(MediaPlayerEntity):
 
-    def __init__(self, name, host):
-        self._data = None
+    def __init__(self, name, host, unique_id=None):
         self._name = name
         self._host = host
-        self._unique_id = f"yamaha_rn301_{host.replace('.', '_')}"
+        # Config entries pass the entry ID so the entity survives a host change;
+        # YAML setups have no entry and keep the host-based ID.
+        self._unique_id = unique_id or f"yamaha_rn301_{host.replace('.', '_')}"
         self._base_url = BASE_URL.format(self._host)
         self._pwstate = STATE_UNKNOWN
         self._volume = 0
         self._muted = False
-        self._is_on = None
-        self._current_state = -1
-        self._current_operation = ''
-        self._set_state = None
         self._source = None
         self._device_source = None
         self._source_list = list(SOURCE_MAPPING.keys())
         self._reverse_mapping = {val: key for key, val in SOURCE_MAPPING.items()}
-        self._operation_list = ['On', 'Vol']
 
         self._media_meta = {}
         self._media_playing = False
         self._media_play_position = None
         self._media_play_position_updated = None
         self._media_play_shuffle = None
-        self._media_play_repeat = None
-        self._media_play_artist = None
-        self._media_play_album = None
-        self._media_play_song = None
-        self._media_playback_state = None
         self._session = None
         self._current_preset = None
-        self._server_navigation_path = []  # Track SERVER navigation path
 
     async def async_update(self) -> None:
         data = await self._do_api_get("<Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone>")
         if not data:
+            if self._attr_available:
+                _LOGGER.warning("Yamaha R-N301 at %s is unreachable", self._host)
+            self._attr_available = False
             return
+        if not self._attr_available:
+            _LOGGER.info("Yamaha R-N301 at %s is reachable again", self._host)
+        self._attr_available = True
         try:
             tree = ET.fromstring(data)
             for node in tree[0][0]:
@@ -139,7 +128,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                             self._muted = voln.text == "On"
                 elif node.tag == "Input":
                     txt = node.find("Input_Sel").text
-                    self._source = self._reverse_mapping[txt]
+                    self._source = self._reverse_mapping.get(txt, txt)
                     self._device_source = txt.replace(" ", "_")
             if self._pwstate != STATE_OFF:
                 await self._update_media_playing()
@@ -251,7 +240,9 @@ class YamahaRn301MP(MediaPlayerEntity):
         return self._media_play_shuffle
 
     async def async_set_shuffle(self, shuffle):
-        await self._media_play_control("Shuffle")
+        await self._do_api_put(
+            '<{0}><Play_Control><Play_Mode><Shuffle>{1}</Shuffle></Play_Mode></Play_Control></{0}>'.format(
+                self._device_source, 'On' if shuffle else 'Off'))
 
     async def async_turn_on(self):
         """Turn on the amplifier"""
@@ -264,11 +255,11 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def async_set_volume_level(self, volume):
         await self._do_api_put(
             '<Main_Zone><Volume><Lvl><Val>{0}</Val><Exp>0</Exp><Unit></Unit></Lvl></Volume></Main_Zone>'.format(
-                int(volume * 100)))
+                round(volume * 100)))
 
     async def async_select_source(self, source):
         await self._do_api_put(
-            '<Main_Zone><Input><Input_Sel>{0}</Input_Sel></Input></Main_Zone>'.format(SOURCE_MAPPING[source]))
+            '<Main_Zone><Input><Input_Sel>{0}</Input_Sel></Input></Main_Zone>'.format(SOURCE_MAPPING.get(source, source)))
 
     async def async_mute_volume(self, mute):
         await self._do_api_put('<System><Volume><Mute>{0}</Mute></Volume></System>'.format('On' if mute else 'Off'))
@@ -335,8 +326,10 @@ class YamahaRn301MP(MediaPlayerEntity):
                 else:
                     _LOGGER.debug("API request ok %d", req.status)
                 return await req.text()
-        except aiohttp.ClientError as e:
-            _LOGGER.error("Request failed: %s", e)
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            # Logged at debug level: async_update reports the receiver going
+            # offline once instead of on every poll.
+            _LOGGER.debug("Request to %s failed: %r", self._host, e)
             return ""
         except Exception as e:
             _LOGGER.error("Unexpected error during API request: %s", e)
@@ -365,7 +358,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             self._pwstate = STATE_PLAYING if self._pwstate != STATE_OFF else STATE_OFF
             self._media_playing = True
         elif text == "Pause":
-            self._pwstate = STATE_IDLE if self._pwstate != STATE_OFF else STATE_OFF
+            self._pwstate = STATE_PAUSED if self._pwstate != STATE_OFF else STATE_OFF
             self._media_playing = True
         else:
             self._media_playing = False
@@ -401,8 +394,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                 for node in tree[0][0]:
                     try:
                         if node.tag == "Play_Mode":
-                            self._media_play_repeat = node.text == "On"
-                            self._media_play_shuffle = node.text == "On"
+                            self._media_play_shuffle = node.findtext("Shuffle") == "On"
                         elif node.tag == "Play_Time":
                             self._media_play_position = int(node.text)
                             self._media_play_position_updated = dt_util.utcnow()
@@ -893,7 +885,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             return await self._get_current_server_list(original_id)
         
         if not media_content_id.startswith("server_menu:"):
-            return await self._browse_server_back(media_content_id)
+            return None
         
         # Parse the path
         parts = media_content_id.split(":")
@@ -954,39 +946,6 @@ class YamahaRn301MP(MediaPlayerEntity):
             if data and 'Menu_Status>Busy<' not in data:
                 return data
             await asyncio.sleep(0.5)
-        
-        return None
-
-    async def _browse_server_back(self, media_content_id):
-        """Handle SERVER back navigation"""
-        if media_content_id.startswith("server_back:"):
-            # Navigate back using Return command
-            await self._do_api_put('<SERVER><List_Control><Cursor>Return</Cursor></List_Control></SERVER>')
-            
-            # Get the current list after going back
-            data = await self._do_api_get("<SERVER><List_Info>GetParam</List_Info></SERVER>")
-            if not data:
-                return None
-            
-            try:
-                tree = ET.fromstring(data)
-                menu_layer = 1
-                
-                # Check menu layer to determine content ID format
-                for node in tree[0][0]:
-                    if node.tag == "Menu_Layer":
-                        menu_layer = int(node.text) if node.text else 1
-                        break
-                
-                # Return browse result for the new level
-                if menu_layer == 1:
-                    return await self._browse_server_root()
-                else:
-                    return await self._browse_server_item("server_menu:current")
-                    
-            except ET.ParseError as e:
-                _LOGGER.error("Failed to parse XML response in server back navigation: %s", e)
-                return None
         
         return None
 

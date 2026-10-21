@@ -87,18 +87,28 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 
 ## Compatibility
 
-- **Home Assistant**: 2022.3.0 or later
-- **Home Assistant Core**: 2025.10+ (with modernized features)
-- **Python**: 3.9 or later
+- **Home Assistant**: 2024.11.0 or later (tested with 2026.10)
 - **Network**: Receiver must be accessible via HTTP on your local network
 
 ## Recent Updates
+
+### Version 1.4.4 - Reliability and Configuration Fixes
+- **FIXED**: Unknown inputs reported by the receiver now fall back to their raw name instead of breaking updates (this was listed for 1.4.3 but was not included)
+- **FIXED**: The entity becomes unavailable when the receiver is unreachable, instead of keeping its last state; the outage is logged once instead of on every poll
+- **FIXED**: Adding an already configured receiver now aborts with "already configured" instead of "Unknown error"
+- **FIXED**: Changing only the name in the integration options is now saved
+- **FIXED**: Changing the host in the integration options no longer creates a new entity. Existing entities are migrated automatically and keep their entity ID
+- **FIXED**: Shuffle now sends the Play_Mode command and reads the shuffle state correctly. It is no longer offered for passive inputs (Optical/Coaxial/CD/Line)
+- **FIXED**: Volume levels are rounded instead of truncated (e.g. 29% no longer becomes 28%)
+- **IMPROVED**: Paused playback is shown as "paused" instead of "idle"
+- **IMPROVED**: Setup and options forms have English and Estonian translations
+- **CHANGED**: Minimum Home Assistant version is now 2024.11.0
+- **TECHNICAL**: Removed dead code and duplicated constants; added tests
 
 ### Version 1.4.3 - AirPlay and Coaxial Inputs
 - **FIXED**: Added missing AirPlay and Coaxial inputs to the source mapping. Selecting either input previously raised a KeyError in the update loop, freezing the entity and logging "Error during update: 'AirPlay'" every poll (thanks @Neubda, #5)
 - **IMPROVED**: AirPlay now shows now-playing info and supports transport controls
 - **IMPROVED**: Coaxial is handled like the other passive inputs (Optical/CD/Line)
-- **ROBUSTNESS**: Unknown inputs reported by the receiver now fall back to their raw name instead of breaking updates
 
 ### Version 1.4.2 - Media Browsing Standards Compliance
 - **FIXED**: Updated media browsing to use MediaClass instead of MediaType for proper Home Assistant standards compliance
@@ -171,7 +181,7 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
-3. Make your changes
+3. Make your changes and run the tests (`pip install -r requirements_test.txt && pytest`)
 4. Submit a pull request
 
 ## License
