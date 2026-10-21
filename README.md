@@ -78,7 +78,13 @@ The receiver's built-in internet radio used the vTuner service, which no longer 
 
 Notes:
 - The receiver cannot play HTTPS streams. Stations that only offer HTTPS (or redirect HTTP to HTTPS) are skipped, and the receiver plays the next working station in the list instead.
-- Radio Browser lists change over time, so a station's position in them can move. For automations, add your stations as YCast bookmarks (they appear under **My Stations**) and play them from there.
+- Radio Browser lists change over time, so a station's position in them can move. For automations, add your stations as YCast bookmarks and play them from **My Stations**. In the YCast app options, bookmarks look like this:
+
+  ```yaml
+  bookmarks:
+    - "Vikerraadio: http://icecast.err.ee/vikerraadiokorge.mp3"
+    - "Raadio 2: http://icecast.err.ee/raadio2korge.mp3"
+  ```
 
 
 When using the UI configuration flow, you can set:
@@ -103,6 +109,12 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **Network**: Receiver must be accessible via HTTP on your local network
 
 ## Recent Updates
+
+### Version 1.5.2 - Continuous Browsing
+- **IMPROVED**: NET RADIO and Server folders open as one continuous list instead of pages of 8. Lists read from the receiver are kept for 10 minutes, so going back and forth is instant. Lists longer than 400 entries continue in a "More" view
+- **IMPROVED**: Moving up uses the media browser's own back button instead of a "Back" entry in the list
+- **IMPROVED**: A level that holds only one folder is skipped, so YCast bookmarks show directly under "My Stations"
+- **FIXED**: Playing a station checks that the receiver shows the expected list by name, not only by menu depth
 
 ### Version 1.5.1 - NET RADIO Browsing
 - **FIXED**: NET RADIO browsing read the list before the receiver finished loading it, showed only the first 8 entries, and did not return to the main menu. It now uses the same browsing as the Server input: pages, back navigation and waiting for the receiver

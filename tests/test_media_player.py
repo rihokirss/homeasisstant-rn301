@@ -196,29 +196,64 @@ async def test_unique_id_migrated_from_host(hass, receiver, config_entry):
     assert hass.states.get(old.entity_id).state == "playing"
 
 
-async def test_server_browse_page_two(hass, hass_ws_client, receiver, config_entry):
+async def test_server_browse_continuous_list(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+
+    # The 10 entries span two receiver pages but are shown as one list
+    music = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
+    assert list(music) == [f"Folder {i}" for i in range(1, 9)] + [
+        # The receiver double-escapes "&"; titles are shown unescaped
+        "Above & Beyond", "Folder 10"]
+
+    folder = await _browse(hass, hass_ws_client, music["Folder 10"])
+    assert folder["result"]["title"] == "Folder 10"
+    assert "Track 10.1" in _children(folder)
+
+
+async def test_server_browse_uses_cache(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    music = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
+    await _browse(hass, hass_ws_client, music["Folder 10"])
+    receiver.puts.clear()
+
+    # Going back to a list read a moment ago does not read it again
+    again = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
+
+    assert again == music
+    assert receiver.puts == []
+
+
+async def test_server_play_after_cached_browse(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    folder_one = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
+    await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_2")
+    # Shown from the cache while the receiver still shows Folder 2
+    folder_one = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
+
+    await _call(hass, "play_media", media_content_id=folder_one["Track 1.3"], media_content_type="music")
+
+    assert receiver.song == "Track 1.3"
+
+
+async def test_long_list_continues_in_more_view(hass, hass_ws_client, receiver, config_entry, monkeypatch):
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.LIST_MAX_ITEMS", 8)
     await setup_entry(hass, config_entry)
 
     music = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
-    assert "Folder 8" in music and "Folder 9" not in music
-    next_page = music["⬇️ Next Page"]
+    assert "Folder 8" in music and "Folder 10" not in music
+    more = await _browse(hass, hass_ws_client, music["⬇️ More (9–10 of 10)"])
 
-    page_two = _children(await _browse(hass, hass_ws_client, next_page, "info"))
-    # The receiver double-escapes "&"; titles are shown unescaped
-    assert "Above & Beyond" in page_two
-
-    folder = await _browse(hass, hass_ws_client, page_two["Folder 10"])
+    assert list(_children(more)) == ["Above & Beyond", "Folder 10"]
+    folder = await _browse(hass, hass_ws_client, _children(more)["Folder 10"])
     assert folder["result"]["title"] == "Folder 10"
-    assert "Track 10.1" in _children(folder)
 
 
 async def test_server_play_track_on_page_two(hass, hass_ws_client, receiver, config_entry):
     await setup_entry(hass, config_entry)
 
     folder = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
-    page_two = _children(await _browse(hass, hass_ws_client, folder["⬇️ Next Page"], "info"))
 
-    await _call(hass, "play_media", media_content_id=page_two["Track 1.10"], media_content_type="music")
+    await _call(hass, "play_media", media_content_id=folder["Track 1.10"], media_content_type="music")
 
     assert receiver.song == "Track 1.10"
     assert hass.states.get(ENTITY_ID).attributes["media_title"] == "Track 1.10"
@@ -282,8 +317,7 @@ async def test_entity_area_kept_when_device_in_other_area(hass, receiver, config
 
 async def test_server_play_stored_track_from_other_menu(hass, hass_ws_client, receiver, config_entry):
     await setup_entry(hass, config_entry)
-    folder = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
-    track_id = _children(await _browse(hass, hass_ws_client, folder["⬇️ Next Page"], "info"))["Track 1.10"]
+    track_id = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))["Track 1.10"]
     # Someone browses elsewhere before an automation plays the stored ID
     await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_10")
 
@@ -306,14 +340,14 @@ async def test_net_radio_browse(hass, hass_ws_client, receiver, config_entry):
 
     radiobrowser = _children(await _browse(hass, hass_ws_client, _children(root)["Radiobrowser"]))
     genres = _children(await _browse(hass, hass_ws_client, radiobrowser["Genres"]))
-    assert "Genre 8" in genres and "Genre 9" not in genres
-    page_two = _children(await _browse(hass, hass_ws_client, genres["⬇️ Next Page"], "info"))
-    genre = await _browse(hass, hass_ws_client, page_two["Genre 10"])
+    assert list(genres) == [f"Genre {i}" for i in range(1, 12)]
+    genre = await _browse(hass, hass_ws_client, genres["Genre 10"])
 
     assert genre["result"]["title"] == "Genre 10"
-    station = genre["result"]["children"][1]
+    station = genre["result"]["children"][0]
     assert (station["title"], station["media_class"], station["can_play"]) == ("Station 10.1", "channel", True)
-    assert genre["result"]["children"][0]["title"] == "🔙 Back"
+    # Shown as a list of stations; moving up is the media browser's own back button
+    assert genre["result"]["children_media_class"] == "channel"
 
 
 async def test_net_radio_play_station(hass, hass_ws_client, receiver, config_entry):
@@ -347,3 +381,30 @@ async def test_browse_not_supported_for_passive_input(hass, hass_ws_client, rece
     response = await _browse(hass, hass_ws_client)
 
     assert not response["success"]
+
+
+async def test_net_radio_single_folder_is_skipped(hass, hass_ws_client, receiver, config_entry):
+    """YCast puts bookmarks in a single "Bookmarks" category under My Stations."""
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    root = _children(await _browse(hass, hass_ws_client))
+
+    my_stations = await _browse(hass, hass_ws_client, root["My Stations"])
+
+    assert my_stations["result"]["title"] == "My Stations"
+    assert my_stations["result"]["media_content_id"] == root["My Stations"]
+    stations = _children(my_stations)
+    assert list(stations) == ["Sky Plus", "Raadio 2"]
+
+    await _call(hass, "play_media", media_content_id=stations["Raadio 2"], media_content_type="channel")
+    assert receiver.station == "Raadio 2"
+
+
+async def test_server_single_server_is_skipped(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+
+    root = await _browse(hass, hass_ws_client)
+
+    # Media Server holds only "ketas", which holds only "Music": both are skipped
+    assert root["result"]["title"] == "Media Server"
+    assert list(_children(root))[:2] == ["Folder 1", "Folder 2"]

@@ -5,6 +5,7 @@ from datetime import datetime
 
 from typing import NamedTuple, Optional
 import asyncio
+import time
 
 import voluptuous as vol
 import aiohttp
@@ -36,6 +37,10 @@ BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 MAX_FAILED_UPDATES = 3
 # Half-second polls while a NET RADIO or SERVER list is busy loading
 LIST_BUSY_RETRIES = 20
+# Items read for one browse view; reading takes about half a second per 8
+LIST_MAX_ITEMS = 400
+# How long a list that was read stays valid for browsing
+LIST_CACHE_SECONDS = 600
 
 _BASE_FEATURES = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.VOLUME_STEP | \
                  MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | MediaPlayerEntityFeature.SELECT_SOURCE
@@ -145,8 +150,10 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._session = None
         self._current_preset = None
         self._failed_updates = 0
-        # Menu path of the list browsed last, per list source tag
+        # (menu path, menu name) of the list the receiver shows, per list source tag
         self._list_paths = {}
+        # Lists read for browsing: (tag, path, start line) -> (time, listing)
+        self._list_cache = {}
 
     async def async_added_to_hass(self) -> None:
         """Move an area set on the entity to its device.
@@ -555,34 +562,114 @@ class YamahaRn301MP(MediaPlayerEntity):
             raise BrowseError(f"Browsing is not supported for source {self._source}")
         try:
             if media_content_id is None or media_content_id == f"{src.prefix}_root":
-                await self._reset_list_to_root(src)
-                return self._list_browse_media(src, await self._wait_for_list(src), f"{src.prefix}_root")
-            return await self._browse_list_item(src, media_content_id)
+                return await self._browse_list(src, f"{src.prefix}_root")
+            if media_content_id.startswith(f"{src.prefix}_more:"):
+                _, start, menu_id = media_content_id.split(":", 2)
+                return await self._browse_list(src, menu_id, int(start))
+            if media_content_id.startswith(f"{src.prefix}_menu:root:"):
+                return await self._browse_list(src, media_content_id)
+            raise BrowseError(f"Unknown media ID {media_content_id}")
         except BrowseError:
             raise
         except Exception as e:
             _LOGGER.exception("Error browsing %s media: %s", src.tag, e)
             raise BrowseError(f"Browsing {self._source} failed") from e
 
-    async def _browse_list_item(self, src, media_content_id):
-        """Browse a folder or page of a NET RADIO or SERVER menu"""
-        if media_content_id.startswith(f"{src.prefix}_page_up:"):
-            await self._do_api_put(f'<{src.tag}><List_Control><Page>Up</Page></List_Control></{src.tag}>')
-            await asyncio.sleep(0.2)
-            original_id = media_content_id.split(":", 1)[1]
-            return self._list_browse_media(src, await self._wait_for_list(src), original_id)
-        if media_content_id.startswith(f"{src.prefix}_page_down:"):
-            await self._do_api_put(f'<{src.tag}><List_Control><Page>Down</Page></List_Control></{src.tag}>')
-            await asyncio.sleep(0.2)
-            original_id = media_content_id.split(":", 1)[1]
-            return self._list_browse_media(src, await self._wait_for_list(src), original_id)
+    async def _browse_list(self, src, menu_id, start=1):
+        """Browse a NET RADIO or SERVER folder as one continuous list.
 
-        parts = media_content_id.split(":")
-        if not media_content_id.startswith(f"{src.prefix}_menu:") or len(parts) < 3:
-            raise BrowseError(f"Unknown media ID {media_content_id}")
+        The receiver only shows 8 lines at a time, so the whole list is read
+        page by page (about half a second per page) and kept for a while, so
+        going back and forth between folders does not read it again. Moving
+        up is left to the media browser's own back navigation.
+        """
+        path = menu_id.split(":")[2:]
+        key = (src.tag, tuple(path), start)
+        cached = self._list_cache.get(key)
+        if cached and time.monotonic() - cached[0] < LIST_CACHE_SECONDS:
+            listing = cached[1]
+        else:
+            await self._show_list(src, path)
+            listing = await self._read_list(src, start)
+            self._list_cache[key] = (time.monotonic(), listing)
 
-        data = await self._navigate_to_list_path(src, parts[2:])
-        return self._list_browse_media(src, data, media_content_id)
+        # Skip a level that holds nothing but one folder, such as YCast's
+        # "My Stations" with its single "Bookmarks" category, or a media
+        # server list with one server
+        items = listing['items']
+        if start == 1 and not listing['next_line'] and len(items) == 1 and items[0]['attribute'] == "Container":
+            only = await self._browse_list(src, f"{src.prefix}_menu:root:{':'.join(path + [items[0]['line_id']])}")
+            only.media_content_id = menu_id
+            only.title = listing['menu_name'] or only.title
+            return only
+
+        children = self._create_browse_media_children(src, listing['items'], ":".join(path), listing['menu_layer'])
+        if not children and listing['menu_layer'] == 1:
+            children.append(BrowseMedia(
+                media_class=MediaClass.DIRECTORY,
+                media_content_id="empty",
+                media_content_type="info",
+                title=src.empty_title,
+                can_play=False,
+                can_expand=False,
+            ))
+        if listing['next_line']:
+            # Very long lists continue in a further view
+            last = min(listing['next_line'] + LIST_MAX_ITEMS - 1, listing['max_line'])
+            children.append(BrowseMedia(
+                media_class=MediaClass.DIRECTORY,
+                media_content_id=f"{src.prefix}_more:{listing['next_line']}:{menu_id}",
+                media_content_type="folder",
+                title=f"⬇️ More ({listing['next_line']}–{last} of {listing['max_line']})",
+                can_play=False,
+                can_expand=True,
+            ))
+
+        return BrowseMedia(
+            media_class=MediaClass.DIRECTORY,
+            media_content_id=menu_id if start == 1 else f"{src.prefix}_more:{start}:{menu_id}",
+            media_content_type="folder",
+            title=listing['menu_name'] or self._source,
+            can_play=False,
+            can_expand=True,
+            children=children,
+        )
+
+    async def _read_list(self, src, start=1):
+        """Read the list the receiver shows from line start on, up to LIST_MAX_ITEMS items."""
+        parsed = self._parse_list_info(await self._wait_for_list(src))
+        items = []
+        line = start
+        jumped = False
+        while line <= parsed['max_line'] and len(items) < LIST_MAX_ITEMS:
+            shown_start = (parsed['current_line'] - 1) // 8 * 8 + 1
+            if not shown_start <= line < shown_start + 8:
+                if jumped:
+                    raise BrowseError(f"The receiver did not show line {line}, try again")
+                await self._do_api_put(f'<{src.tag}><List_Control><Jump_Line>{line}</Jump_Line></List_Control></{src.tag}>')
+                parsed = self._parse_list_info(await self._wait_for_list(src))
+                jumped = True
+                continue
+            jumped = False
+            items += [item for item in parsed['items'] if int(item['line_id'][5:]) >= line]
+            line = shown_start + 8
+
+        return {
+            'menu_name': parsed['menu_name'],
+            'menu_layer': parsed['menu_layer'],
+            'max_line': parsed['max_line'],
+            'items': items,
+            'next_line': line if line <= parsed['max_line'] else None,
+        }
+
+    async def _show_list(self, src, path):
+        """Make the receiver show the list at path, walking there from the root if needed."""
+        parsed = self._parse_list_info(await self._wait_for_list(src))
+        # Walking the menu from the root is slow, so skip it when the list
+        # shown is the one browsed last (e.g. right after browsing in the UI)
+        if self._list_paths.get(src.tag) != (path, parsed['menu_name']) or parsed['menu_layer'] != len(path) + 1:
+            parsed = self._parse_list_info(await self._navigate_to_list_path(src, path))
+        self._list_paths[src.tag] = (path, parsed['menu_name'])
 
     async def _navigate_and_play(self, src, media_id):
         """Navigate to and play a NET RADIO station or SERVER track"""
@@ -590,16 +677,10 @@ class YamahaRn301MP(MediaPlayerEntity):
         if len(parts) < 3 or not parts[-1].startswith("Line_"):
             _LOGGER.warning("Could not extract line_id from %s", media_id)
             return
-        parent = parts[2:-1]
 
-        # Walking the menu from the root is slow, so skip it when the list
-        # browsed last is still shown (e.g. right after browsing in the UI);
-        # a stored media ID played from an automation needs the full walk
-        data = await self._wait_for_list(src)
-        if (self._list_paths.get(src.tag) != parent
-                or self._parse_list_info(data)['menu_layer'] != len(parent) + 1):
-            await self._navigate_to_list_path(src, parent)
-
+        # A stored media ID played from an automation may find the receiver
+        # showing another list
+        await self._show_list(src, parts[2:-1])
         await self._select_list_line(src, parts[-1])
         await asyncio.sleep(0.2)
 
@@ -655,36 +736,6 @@ class YamahaRn301MP(MediaPlayerEntity):
             'items': items
         }
 
-    def _list_browse_media(self, src, data, media_content_id):
-        """Build the BrowseMedia for the list the receiver currently shows"""
-        parsed = self._parse_list_info(data)
-        parts = media_content_id.split(":")
-        path = parts[2:]
-        self._list_paths[src.tag] = path
-
-        children = self._create_browse_media_children(src, parsed['items'], ":".join(path), parsed['menu_layer'])
-        if not children and parsed['menu_layer'] == 1:
-            children.append(BrowseMedia(
-                media_class=MediaClass.DIRECTORY,
-                media_content_id="empty",
-                media_content_type="info",
-                title=src.empty_title,
-                can_play=False,
-                can_expand=False,
-            ))
-        self._add_pagination_controls(src, children, parsed['current_line'], parsed['max_line'], media_content_id)
-        self._add_back_navigation(src, children, parsed['menu_layer'], parts)
-
-        return BrowseMedia(
-            media_class=MediaClass.DIRECTORY,
-            media_content_id=media_content_id,
-            media_content_type="folder",
-            title=parsed['menu_name'] or self._source,
-            can_play=False,
-            can_expand=True,
-            children=children,
-        )
-
     def _create_browse_media_children(self, src, items, base_path="", menu_layer=1):
         """Create BrowseMedia children from parsed items"""
         children = []
@@ -715,59 +766,6 @@ class YamahaRn301MP(MediaPlayerEntity):
                 ))
 
         return children
-
-    def _add_pagination_controls(self, src, children, current_line, max_line, base_content_id):
-        """Add pagination controls to children list"""
-        if max_line > 8:
-            # Add "Previous Page" if not on first page
-            if current_line > 8:
-                children.append(BrowseMedia(
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_id=f"{src.prefix}_page_up:{base_content_id}",
-                    media_content_type="info",
-                    title="⬆️ Previous Page",
-                    can_play=False,
-                    can_expand=True,
-                ))
-
-            # Add "Next Page" if not on last page
-            current_page = (current_line - 1) // 8 + 1
-            total_pages = (max_line - 1) // 8 + 1
-            if current_page < total_pages:
-                children.append(BrowseMedia(
-                    media_class=MediaClass.DIRECTORY,
-                    media_content_id=f"{src.prefix}_page_down:{base_content_id}",
-                    media_content_type="info",
-                    title="⬇️ Next Page",
-                    can_play=False,
-                    can_expand=True,
-                ))
-
-            # Add page info
-            children.append(BrowseMedia(
-                media_class=MediaClass.DIRECTORY,
-                media_content_id="page_info",
-                media_content_type="info",
-                title=f"📄 Page {current_page} of {total_pages} ({max_line} items)",
-                can_play=False,
-                can_expand=False,
-            ))
-
-    def _add_back_navigation(self, src, children, menu_layer, parts):
-        """Add back navigation control"""
-        if menu_layer > 1:
-            # Create parent path by removing last element
-            parent_path = ":".join(parts[2:-1])
-            back_id = f"{src.prefix}_menu:root:{parent_path}" if parent_path else f"{src.prefix}_root"
-
-            children.insert(0, BrowseMedia(
-                media_class=MediaClass.DIRECTORY,
-                media_content_id=back_id,
-                media_content_type="folder",
-                title="🔙 Back",
-                can_play=False,
-                can_expand=True,
-            ))
 
     async def _navigate_to_list_path(self, src, path_parts):
         """Navigate to a menu path from the root and return the list there"""

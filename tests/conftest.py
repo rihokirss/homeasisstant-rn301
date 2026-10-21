@@ -30,7 +30,7 @@ NET_RADIO_TREE = ("NET RADIO", [
         ("Genres", [(f"Genre {i}", [(f"Station {i}.{j}", None) for j in range(1, 4)]) for i in range(1, 12)]),
         ("Countries", [("Estonia", [("Raadio 2", None), ("Vikerraadio", None)])]),
     ]),
-    ("My Stations", []),
+    ("My Stations", [("Bookmarks", [("Sky Plus", None), ("Raadio 2", None)])]),
 ])
 
 
