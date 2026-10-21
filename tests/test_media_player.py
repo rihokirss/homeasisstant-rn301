@@ -6,7 +6,7 @@ from homeassistant.helpers.entity_component import async_update_entity
 
 from custom_components.yamaha_rn301.const import DOMAIN
 
-from .conftest import ENTITY_ID, HOST, setup_entry
+from .conftest import ENTITY_ID, HOST, NET_RADIO_TREE, setup_entry
 
 
 async def _call(hass, service, **data):
@@ -278,3 +278,68 @@ async def test_entity_area_kept_when_device_in_other_area(hass, receiver, config
     # Conflicting areas are left for the user to resolve
     assert registry.async_get(old.entity_id).area_id == room.id
     assert dr.async_get(hass).async_get(device.id).area_id == other.id
+
+
+async def test_server_play_stored_track_from_other_menu(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    folder = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
+    track_id = _children(await _browse(hass, hass_ws_client, folder["⬇️ Next Page"], "info"))["Track 1.10"]
+    # Someone browses elsewhere before an automation plays the stored ID
+    await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_10")
+
+    await _call(hass, "play_media", media_content_id=track_id, media_content_type="music")
+
+    assert receiver.song == "Track 1.10"
+
+
+async def test_net_radio_browse(hass, hass_ws_client, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    # The receiver is left deep in a station list
+    receiver.lists["NET_RADIO"].append((NET_RADIO_TREE[1][0], 1))
+
+    root = await _browse(hass, hass_ws_client)
+    assert root["result"]["title"] == "NET RADIO"
+    assert list(_children(root)) == ["Radiobrowser", "My Stations"]
+
+    radiobrowser = _children(await _browse(hass, hass_ws_client, _children(root)["Radiobrowser"]))
+    genres = _children(await _browse(hass, hass_ws_client, radiobrowser["Genres"]))
+    assert "Genre 8" in genres and "Genre 9" not in genres
+    page_two = _children(await _browse(hass, hass_ws_client, genres["⬇️ Next Page"], "info"))
+    genre = await _browse(hass, hass_ws_client, page_two["Genre 10"])
+
+    assert genre["result"]["title"] == "Genre 10"
+    station = genre["result"]["children"][1]
+    assert (station["title"], station["media_class"], station["can_play"]) == ("Station 10.1", "channel", True)
+    assert genre["result"]["children"][0]["title"] == "🔙 Back"
+
+
+async def test_net_radio_play_station(hass, hass_ws_client, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    estonia = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_2:Line_1"))
+
+    await _call(hass, "play_media", media_content_id=estonia["Raadio 2"], media_content_type="channel")
+
+    assert receiver.song == "Raadio 2"
+    assert hass.states.get(ENTITY_ID).attributes["media_title"] == "Raadio 2"
+
+
+async def test_net_radio_play_stored_station(hass, receiver, config_entry):
+    """An automation plays a station ID saved earlier, with the menu elsewhere."""
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+
+    await _call(hass, "play_media", media_content_id="netradio_track:root:Line_1:Line_2:Line_1:Line_2",
+                media_content_type="channel")
+
+    assert receiver.song == "Vikerraadio"
+
+
+async def test_browse_not_supported_for_passive_input(hass, hass_ws_client, receiver, config_entry):
+    receiver.input = "OPTICAL"
+    await setup_entry(hass, config_entry)
+
+    response = await _browse(hass, hass_ws_client)
+
+    assert not response["success"]

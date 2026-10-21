@@ -24,6 +24,14 @@ SERVER_TREE = ("Media Server", [
          + [("Above & Beyond", [("Track AB.1", None)]), ("Folder 10", [("Track 10.1", None)])]),
     ]),
 ])
+# NET RADIO menu as served by YCast; "Genres" has 11 entries (two pages)
+NET_RADIO_TREE = ("NET RADIO", [
+    ("Radiobrowser", [
+        ("Genres", [(f"Genre {i}", [(f"Station {i}.{j}", None) for j in range(1, 4)]) for i in range(1, 12)]),
+        ("Countries", [("Estonia", [("Raadio 2", None), ("Vikerraadio", None)])]),
+    ]),
+    ("My Stations", []),
+])
 
 
 @pytest.fixture(autouse=True)
@@ -47,8 +55,8 @@ class FakeReceiver:
         self.repeat = "Off"
         self.song = "Song"
         self.puts = []
-        # SERVER menu position: stack of (node, current_line)
-        self.server_stack = [(SERVER_TREE, 1)]
+        # Menu position per list input: stack of (node, current_line)
+        self.lists = {"SERVER": [(SERVER_TREE, 1)], "NET_RADIO": [(NET_RADIO_TREE, 1)]}
         # Number of List_Info polls answered with Menu_Status Busy after a selection
         self.busy_polls = 0
         self._busy_left = 0
@@ -69,8 +77,8 @@ class FakeReceiver:
             body = f"<System><Config><Model_Name>R-N301</Model_Name><System_ID>{self.serial}</System_ID></Config></System>"
         elif section.tag == "Main_Zone" and section.find("Basic_Status") is not None:
             body = self._basic_status()
-        elif section.tag == "SERVER" and section.find("List_Info") is not None:
-            body = self._server_list_info()
+        elif section.tag in self.lists and section.find("List_Info") is not None:
+            body = self._list_info(section.tag)
         elif section.find("Play_Info") is not None:
             body = self._play_info(section.tag)
         else:
@@ -91,35 +99,36 @@ class FakeReceiver:
             self.repeat = repeat
         if (playback := section.findtext("Play_Control/Playback")) is not None:
             self.playback = playback
-        if section.tag == "SERVER" and section.find("List_Control") is not None:
-            self._server_list_control(section.find("List_Control"))
+        if section.tag in self.lists and section.find("List_Control") is not None:
+            self._list_control(self.lists[section.tag], section.find("List_Control"))
 
-    def _server_list_control(self, control):
-        node, line = self.server_stack[-1]
+    def _list_control(self, stack, control):
+        node, line = stack[-1]
         items = node[1]
         page_start = (line - 1) // 8 * 8 + 1
         if (jump := control.findtext("Jump_Line")) is not None:
-            self.server_stack[-1] = (node, int(jump))
+            stack[-1] = (node, int(jump))
         elif (sel := control.findtext("Direct_Sel")) is not None:
             title, children = items[page_start + int(sel[5:]) - 2]
             if children is None:
                 self.song, self.playback = title, "Play"
             else:
-                self.server_stack.append(((title, children), 1))
+                stack.append(((title, children), 1))
                 self._busy_left = self.busy_polls
         elif (page := control.findtext("Page")) is not None:
             if page == "Down" and page_start + 8 <= len(items):
-                self.server_stack[-1] = (node, page_start + 8)
+                stack[-1] = (node, page_start + 8)
             elif page == "Up" and page_start > 8:
-                self.server_stack[-1] = (node, page_start - 8)
-        elif control.findtext("Cursor") == "Return" and len(self.server_stack) > 1:
-            self.server_stack.pop()
+                stack[-1] = (node, page_start - 8)
+        elif control.findtext("Cursor") == "Return" and len(stack) > 1:
+            stack.pop()
 
-    def _server_list_info(self):
+    def _list_info(self, tag):
         if self._busy_left:
             self._busy_left -= 1
-            return "<SERVER><List_Info><Menu_Status>Busy</Menu_Status></List_Info></SERVER>"
-        (name, items), line = self.server_stack[-1]
+            return f"<{tag}><List_Info><Menu_Status>Busy</Menu_Status></List_Info></{tag}>"
+        stack = self.lists[tag]
+        (name, items), line = stack[-1]
         page_start = (line - 1) // 8 * 8 + 1
         lines = ""
         for i in range(8):
@@ -131,11 +140,11 @@ class FakeReceiver:
                 txt, attr = "", "Unselectable"
             lines += f"<Line_{i + 1}><Txt>{txt}</Txt><Attribute>{attr}</Attribute></Line_{i + 1}>"
         return (
-            "<SERVER><List_Info><Menu_Status>Ready</Menu_Status>"
-            f"<Menu_Layer>{len(self.server_stack)}</Menu_Layer><Menu_Name>{escape(name)}</Menu_Name>"
+            f"<{tag}><List_Info><Menu_Status>Ready</Menu_Status>"
+            f"<Menu_Layer>{len(stack)}</Menu_Layer><Menu_Name>{escape(name)}</Menu_Name>"
             f"<Current_List>{lines}</Current_List>"
             f"<Cursor_Position><Current_Line>{line}</Current_Line><Max_Line>{len(items)}</Max_Line></Cursor_Position>"
-            "</List_Info></SERVER>"
+            f"</List_Info></{tag}>"
         )
 
     def _basic_status(self):
