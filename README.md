@@ -64,11 +64,22 @@ Once installed and configured, the Yamaha R-N301 will appear as a media player e
 - Create automations and scripts using the media player services
 - Access different input sources with varying capabilities:
   - **Full Control**: Spotify, Server, AirPlay (play/pause/stop/skip/shuffle; repeat on Server)
-  - **Net Radio**: Browse and play stations
+  - **Net Radio**: Browse and play stations (see [NET RADIO After the vTuner Shutdown](#net-radio-after-the-vtuner-shutdown))
   - **TUNER Control**: Power, volume, source, preset switching via next/previous track buttons
   - **Basic Control**: Optical, Coaxial, CD, Line inputs (power/volume/source only)
 
-## Configuration Options
+## NET RADIO After the vTuner Shutdown
+
+The receiver's built-in internet radio used the vTuner service, which no longer serves the R-N301. You can bring it back with [YCast](https://github.com/milaq/YCast), a self-hosted vTuner replacement that lists stations from the [Radio Browser](https://www.radio-browser.info/) directory. This was tested with an R-N301 (firmware 1.13/0.05):
+
+1. Install the YCast app: add the repository `https://github.com/casperklein/homeassistant-addons` under **Settings → Add-ons → Add-on Store → ⋮ → Repositories**, then install and start **YCast**. It listens on port 80 of your Home Assistant host.
+2. Point `radioyamaha.vtuner.com` and `radioyamaha2.vtuner.com` to your Home Assistant host's IP address in the DNS server **the receiver uses**. Check the receiver's network settings: if it uses another DNS server than your router (for example a Pi-hole or a domain controller), add the records there.
+3. Select the NET RADIO input. The receiver's menu, the remote and the Home Assistant media browser now show **Radiobrowser** (by genre, country, language and popularity) and **My Stations**.
+
+Notes:
+- The receiver cannot play HTTPS streams. Stations that only offer HTTPS (or redirect HTTP to HTTPS) are skipped, and the receiver plays the next working station in the list instead.
+- Radio Browser lists change over time, so a station's position in them can move. For automations, add your stations as YCast bookmarks (they appear under **My Stations**) and play them from there.
+
 
 When using the UI configuration flow, you can set:
 - **Host**: IP address of your Yamaha R-N301 (required, can be changed later)
@@ -92,6 +103,12 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **Network**: Receiver must be accessible via HTTP on your local network
 
 ## Recent Updates
+
+### Version 1.5.1 - NET RADIO Browsing
+- **FIXED**: NET RADIO browsing read the list before the receiver finished loading it, showed only the first 8 entries, and did not return to the main menu. It now uses the same browsing as the Server input: pages, back navigation and waiting for the receiver
+- **FIXED**: Playing a saved station or track (for example from an automation) now navigates to it even when the receiver's menu is somewhere else
+- **IMPROVED**: The NET RADIO station name is shown as the media channel, with the current song as the title
+- **DOCS**: How to bring NET RADIO back after the vTuner shutdown with YCast
 
 ### Version 1.5.0 - Discovery, Reliability and Modernization
 - **NEW**: Automatic discovery over SSDP. When the receiver gets a new IP address from DHCP, the configured entry is updated automatically

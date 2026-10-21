@@ -323,8 +323,9 @@ async def test_net_radio_play_station(hass, hass_ws_client, receiver, config_ent
 
     await _call(hass, "play_media", media_content_id=estonia["Raadio 2"], media_content_type="channel")
 
-    assert receiver.song == "Raadio 2"
-    assert hass.states.get(ENTITY_ID).attributes["media_title"] == "Raadio 2"
+    assert receiver.station == "Raadio 2"
+    attributes = hass.states.get(ENTITY_ID).attributes
+    assert (attributes["media_channel"], attributes["media_title"]) == ("Raadio 2", "Artist - Song")
 
 
 async def test_net_radio_play_stored_station(hass, receiver, config_entry):
@@ -336,7 +337,7 @@ async def test_net_radio_play_stored_station(hass, receiver, config_entry):
     await _call(hass, "play_media", media_content_id="netradio_track:root:Line_1:Line_2:Line_1:Line_2",
                 media_content_type="channel")
 
-    assert receiver.song == "Vikerraadio"
+    assert receiver.station == "Vikerraadio"
 
 
 async def test_browse_not_supported_for_passive_input(hass, hass_ws_client, receiver, config_entry):

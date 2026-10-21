@@ -54,6 +54,7 @@ class FakeReceiver:
         self.shuffle = "Off"
         self.repeat = "Off"
         self.song = "Song"
+        self.station = "Station"
         self.puts = []
         # Menu position per list input: stack of (node, current_line)
         self.lists = {"SERVER": [(SERVER_TREE, 1)], "NET_RADIO": [(NET_RADIO_TREE, 1)]}
@@ -115,7 +116,8 @@ class FakeReceiver:
         elif (sel := control.findtext("Direct_Sel")) is not None:
             title, children = items[page_start + int(sel[5:]) - 2]
             if children is None:
-                self.song, self.playback = title, "Play"
+                self.song = self.station = title
+                self.playback = "Play"
             else:
                 stack.append(((title, children), 1))
                 self._busy_left = self.busy_polls
@@ -161,12 +163,16 @@ class FakeReceiver:
         )
 
     def _play_info(self, tag):
+        if tag == "NET_RADIO":
+            meta = f"<Station>{escape(self.station)}</Station><Album></Album><Song>Artist - Song</Song>"
+        else:
+            meta = f"<Artist>Artist</Artist><Album>Album</Album><Song>{escape(self.song)}</Song>"
         return (
             f"<{tag}><Play_Info>"
             "<Feature_Availability>Ready</Feature_Availability>"
             f"<Playback_Info>{self.playback}</Playback_Info>"
             f"<Play_Mode><Repeat>{self.repeat}</Repeat><Shuffle>{self.shuffle}</Shuffle></Play_Mode>"
-            f"<Meta_Info><Artist>Artist</Artist><Album>Album</Album><Song>{escape(self.song)}</Song></Meta_Info>"
+            f"<Meta_Info>{meta}</Meta_Info>"
             f"</Play_Info></{tag}>"
         )
 

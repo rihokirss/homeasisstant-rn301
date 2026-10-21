@@ -277,6 +277,15 @@ class YamahaRn301MP(MediaPlayerEntity):
             return self._media_meta.get("song")
         elif "frequency" in self._media_meta:
             return self._media_meta.get("frequency")
+        # NET RADIO stations that send no song information
+        return self._media_meta.get("station")
+
+    @property
+    def media_channel(self):
+        """Station of the playing NET RADIO stream"""
+        if self._source == "Tuner":
+            return None
+        return self._media_meta.get("station")
 
     @property
     def media_album_name(self):
@@ -432,7 +441,7 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def _update_media_playing(self):
         media_meta_mapping = {
             'Artist': 'artist',
-            'Station': 'song',
+            'Station': 'station',
             'Radio_Text_A': 'song',
             'Album': 'album',
             'Song': 'song',
