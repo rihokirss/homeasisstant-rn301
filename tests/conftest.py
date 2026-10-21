@@ -65,6 +65,8 @@ class FakeReceiver:
         # page as ready, before the receiver starts loading the new one
         self.jump_lag_polls = 0
         self._pending_jump = None
+        # Number of Jump_Line commands to ignore, as the receiver now and then does
+        self.ignore_jumps = 0
 
     async def handle(self, method, url, data):
         if not self.online or url.host not in self.hosts:
@@ -112,6 +114,9 @@ class FakeReceiver:
         items = node[1]
         page_start = (line - 1) // 8 * 8 + 1
         if (jump := control.findtext("Jump_Line")) is not None:
+            if self.ignore_jumps:
+                self.ignore_jumps -= 1
+                return
             self._pending_jump = [stack, int(jump), self.jump_lag_polls]
         elif self._busy_left:
             # Like the real receiver, ignore selections while loading a list

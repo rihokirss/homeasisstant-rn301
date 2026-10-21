@@ -411,3 +411,14 @@ async def test_server_single_server_is_skipped(hass, hass_ws_client, receiver, c
     # Media Server holds only "ketas", which holds only "Music": both are skipped
     assert root["result"]["title"] == "Media Server"
     assert list(_children(root))[:2] == ["Folder 1", "Folder 2"]
+
+
+async def test_ignored_jump_is_sent_again(hass, hass_ws_client, receiver, config_entry, monkeypatch):
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.LIST_JUMP_RESEND", 0.3)
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    receiver.ignore_jumps = 1
+
+    genres = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_1"))
+
+    assert list(genres) == [f"Genre {i}" for i in range(1, 12)]

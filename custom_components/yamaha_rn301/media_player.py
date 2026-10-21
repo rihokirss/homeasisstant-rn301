@@ -39,6 +39,8 @@ MAX_FAILED_UPDATES = 3
 # about half a second, a media server waking up several seconds
 LIST_BUSY_POLL_INTERVAL = 0.15
 LIST_BUSY_TIMEOUT = 10
+# Seconds before a Jump_Line the receiver did not act on is sent again
+LIST_JUMP_RESEND = 2
 # Items read for one browse view; reading takes about half a second per 8
 LIST_MAX_ITEMS = 400
 # How long a list that was read stays valid for browsing
@@ -787,12 +789,16 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def _jump_to_line(self, src, line):
         """Show the page holding a line of the current list and return the list info."""
-        await self._do_api_put(f'<{src.tag}><List_Control><Jump_Line>{line}</Jump_Line></List_Control></{src.tag}>')
         # The receiver may still report the old page as ready right after the
         # jump, then is busy while it loads the new one (about half a second
-        # for NET RADIO) and ignores selections until it is done
+        # for NET RADIO) and ignores selections until it is done. Now and then
+        # it ignores the jump itself; it is absolute, so it is safe to resend.
         deadline = time.monotonic() + LIST_BUSY_TIMEOUT
+        resend = 0
         while True:
+            if time.monotonic() >= resend:
+                await self._do_api_put(f'<{src.tag}><List_Control><Jump_Line>{line}</Jump_Line></List_Control></{src.tag}>')
+                resend = time.monotonic() + LIST_JUMP_RESEND
             parsed = self._parse_list_info(await self._wait_for_list(src))
             shown_start = (parsed['current_line'] - 1) // 8 * 8 + 1
             if shown_start <= line < shown_start + 8:
