@@ -59,7 +59,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_HOST): cv.string
 })
 SOURCE_MAPPING = {
+    'AirPlay': 'AirPlay',
     'Optical': 'OPTICAL',
+    'Coaxial': 'COAXIAL',
     'CD': 'CD',
     'Spotify': 'Spotify',
     'Line 1': 'LINE1',
@@ -158,7 +160,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             return SUPPORT_NET_RADIO
         elif self._source == "Server":
             return SUPPORT_SERVER
-        elif self._source in ("Optical", "CD", "Line 1", "Line 2", "Line 3"):
+        elif self._source in ("Optical", "Coaxial", "CD", "Line 1", "Line 2", "Line 3"):
             return SUPPORTED_PLAYBACK
         return SUPPORT_YAMAHA
 
@@ -384,7 +386,8 @@ class YamahaRn301MP(MediaPlayerEntity):
             "Spotify": "Spotify",
             "NET_RADIO": "NET_RADIO",
             "SERVER": "SERVER",
-            "TUNER": "Tuner"
+            "TUNER": "Tuner",
+            "AirPlay": "AirPlay"
         }
 
         try:
