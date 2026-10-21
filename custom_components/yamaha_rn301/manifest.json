@@ -9,5 +9,11 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/rihokirss/homeasisstant-rn301/issues",
   "requirements": [],
-  "version": "1.4.4"
+  "ssdp": [
+    {
+      "manufacturer": "Yamaha Corporation",
+      "modelName": "R-N301"
+    }
+  ],
+  "version": "1.5.0"
 }

@@ -1,29 +1,14 @@
 import voluptuous as vol
-import aiohttp
 import logging
+from urllib.parse import urlparse
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.const import CONF_HOST, CONF_NAME
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT
+from homeassistant.helpers.service_info.ssdp import ATTR_UPNP_SERIAL, SsdpServiceInfo
+from .api import async_get_serial
+from .const import DOMAIN, DEFAULT_NAME
 
 _LOGGER = logging.getLogger(__name__)
-
-
-async def _async_test_connection(hass, host):
-    """Test connection to Yamaha receiver."""
-    try:
-        url = f"http://{host}/YamahaRemoteControl/ctrl"
-        data = '<?xml version="1.0" encoding="utf-8"?><YAMAHA_AV cmd="GET"><Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone></YAMAHA_AV>'
-
-        session = async_get_clientsession(hass)
-        timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT)
-
-        async with session.post(url, data=data, timeout=timeout) as response:
-            return response.status == 200
-    except Exception:
-        _LOGGER.debug("Connection test to %s failed", host, exc_info=True)
-        return False
 
 
 class YamahaRN301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -32,6 +17,8 @@ class YamahaRN301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_LOCAL_POLL
 
+    _discovered_host = None
+
     async def async_step_user(self, user_input=None):
         """Handle the initial step of the configuration flow."""
         errors = {}
@@ -39,17 +26,22 @@ class YamahaRN301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST]
 
-            # Must stay outside any try/except: it aborts the flow by raising.
-            await self.async_set_unique_id(f"rn301_{host}")
-            self._abort_if_unique_id_configured()
+            # The abort helpers raise, so they must stay outside any try/except
+            self._async_abort_entries_match({CONF_HOST: host})
 
-            if await _async_test_connection(self.hass, host):
+            serial = await async_get_serial(self.hass, host)
+            if serial is None:
+                errors["base"] = "cannot_connect"
+            else:
+                # Re-adding a configured receiver at a new address updates its host
+                await self.async_set_unique_id(serial or f"rn301_{host}")
+                self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+
                 name = user_input.get(CONF_NAME, DEFAULT_NAME)
                 return self.async_create_entry(
                     title=name,
                     data={CONF_HOST: host, CONF_NAME: name}
                 )
-            errors["base"] = "cannot_connect"
 
         data_schema = vol.Schema({
             vol.Required(CONF_HOST): str,
@@ -58,6 +50,40 @@ class YamahaRN301ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user", data_schema=data_schema, errors=errors
+        )
+
+    async def async_step_ssdp(self, discovery_info: SsdpServiceInfo):
+        """Handle a receiver announced over SSDP.
+
+        For a receiver that is already configured this keeps its host up to
+        date when it gets a new IP address from DHCP.
+        """
+        host = urlparse(discovery_info.ssdp_location or "").hostname
+        serial = discovery_info.upnp.get(ATTR_UPNP_SERIAL)
+        if not host or not serial:
+            return self.async_abort(reason="not_supported")
+
+        await self.async_set_unique_id(serial)
+        self._abort_if_unique_id_configured(updates={CONF_HOST: host})
+        # Entries whose unique ID has not been migrated to the serial yet
+        self._async_abort_entries_match({CONF_HOST: host})
+
+        self._discovered_host = host
+        self.context["title_placeholders"] = {"name": f"{DEFAULT_NAME} ({host})"}
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(self, user_input=None):
+        """Confirm adding a discovered receiver."""
+        if user_input is not None:
+            return self.async_create_entry(
+                title=DEFAULT_NAME,
+                data={CONF_HOST: self._discovered_host, CONF_NAME: DEFAULT_NAME},
+            )
+
+        self._set_confirm_only()
+        return self.async_show_form(
+            step_id="confirm",
+            description_placeholders={"host": self._discovered_host},
         )
 
     @staticmethod
@@ -77,16 +103,15 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             host = user_input[CONF_HOST]
             name = user_input[CONF_NAME]
-            unique_id = f"rn301_{host}"
 
             if host != self.config_entry.data.get(CONF_HOST):
                 if any(
-                    entry.unique_id == unique_id
+                    entry.data.get(CONF_HOST) == host
                     for entry in self.hass.config_entries.async_entries(DOMAIN)
                     if entry.entry_id != self.config_entry.entry_id
                 ):
                     errors["base"] = "already_configured"
-                elif not await _async_test_connection(self.hass, host):
+                elif await async_get_serial(self.hass, host) is None:
                     errors["base"] = "cannot_connect"
 
             if not errors:
@@ -94,7 +119,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 self.hass.config_entries.async_update_entry(
                     self.config_entry,
                     title=name,
-                    unique_id=unique_id,
                     data={**self.config_entry.data, CONF_HOST: host, CONF_NAME: name},
                 )
                 return self.async_create_entry(title="", data={})

@@ -2,21 +2,22 @@
 
 This custom component for Home Assistant provides integration with the Yamaha R-N301 network receiver, enabling control of various functions like power, volume, source selection, and media playback.
 
-**Updated for Home Assistant 2025.10+** - This integration has been modernized with config flow support, async HTTP calls, and compatibility with the latest Home Assistant versions.
+**Requires Home Assistant 2024.11 or later** (tested with 2026.10). Set up from the UI, with automatic discovery of the receiver on your network.
 
 ## Features
 
 - **Power Control**: Turn your receiver on or off
-- **Volume Control**: Adjust the volume and mute state
+- **Volume Control**: Adjust the volume, step it up or down, and mute
 - **Source Selection**: Choose between inputs like Optical, CD, Line, and more
-- **Media Playback**: Control media playback including play, pause, stop, and track navigation
+- **Media Playback**: Control media playback including play, pause, stop, track navigation, shuffle and repeat
 - **Enhanced Media Information**: Display track info, station names, and frequencies
 - **TUNER Preset Support**: Switch between radio presets using next/previous buttons (works even without signal lock)
+- **Media Server Browsing**: Browse DLNA media servers (SERVER input) page by page and play tracks directly in Home Assistant
 - **NET RADIO Browse Media**: Browse and select internet radio stations directly in Home Assistant
+- **Automatic Discovery**: Home Assistant finds the receiver on your network (SSDP) and offers to add it
+- **Follows IP Changes**: When the receiver gets a new IP address from DHCP, Home Assistant updates it automatically
 - **Config Flow**: Easy setup through Home Assistant UI with connection testing
-- **IP Address Management**: Change receiver IP address through Home Assistant UI (Settings → Configure)
-- **Unique Entity ID**: Full UI management support for device settings
-- **Modern Architecture**: Fully async implementation compatible with Home Assistant 2025.10+
+- **Device Registry**: The receiver shows up as a device; the entity keeps its ID when settings change
 
 ## Installation
 
@@ -27,15 +28,14 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 3. Search for "Yamaha R-N301" and click **Download**
 4. Restart Home Assistant
 5. Go to **Settings** → **Devices & Services** → **Integrations**
-6. Click **Add Integration** and search for "Yamaha R-N301"
-7. Enter your receiver's IP address and optional name
+6. The receiver is usually discovered automatically: click **Add** on the discovered Yamaha R-N301. Otherwise click **Add Integration**, search for "Yamaha R-N301" and enter the receiver's IP address and an optional name
 
 > 🎉 **Now available in HACS default repositories!** No need to add custom repository URL anymore.
 
 ### Method 2: Manual Installation
 
 1. Download or clone this repository
-2. Copy the `custom_components/rn301` folder to your Home Assistant `custom_components` directory
+2. Copy the `custom_components/yamaha_rn301` folder to your Home Assistant `custom_components` directory
 3. Restart Home Assistant
 4. Go to **Settings** → **Devices & Services** → **Integrations**
 5. Click **Add Integration** and search for "Yamaha R-N301"
@@ -48,7 +48,7 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 
    ```yaml
    media_player:
-     - platform: rn301
+     - platform: yamaha_rn301
        host: YOUR_RECEIVER_IP
        name: Yamaha R-N301
    ```
@@ -63,7 +63,8 @@ Once installed and configured, the Yamaha R-N301 will appear as a media player e
 - Use the Lovelace UI to control power, volume, source selection, and media playback
 - Create automations and scripts using the media player services
 - Access different input sources with varying capabilities:
-  - **Full Control**: Spotify, Net Radio, Server, AirPlay (play/pause/stop/skip/shuffle)
+  - **Full Control**: Spotify, Server, AirPlay (play/pause/stop/skip/shuffle; repeat on Server)
+  - **Net Radio**: Browse and play stations
   - **TUNER Control**: Power, volume, source, preset switching via next/previous track buttons
   - **Basic Control**: Optical, Coaxial, CD, Line inputs (power/volume/source only)
 
@@ -74,7 +75,7 @@ When using the UI configuration flow, you can set:
 - **Name**: Custom name for the device (optional, defaults to "Yamaha R-N301", can be changed later)
 
 **Changing Configuration Later:**
-You can modify the IP address and device name anytime through:
+If the receiver gets a new IP address, Home Assistant normally picks it up automatically through discovery. You can also modify the IP address and device name anytime through:
 1. Go to **Settings** → **Devices & Services**
 2. Find your Yamaha R-N301 integration
 3. Click **Configure**
@@ -92,23 +93,26 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 
 ## Recent Updates
 
-### Version 1.4.4 - Reliability and Configuration Fixes
-- **FIXED**: Unknown inputs reported by the receiver now fall back to their raw name instead of breaking updates (this was listed for 1.4.3 but was not included)
-- **FIXED**: The entity becomes unavailable when the receiver is unreachable, instead of keeping its last state; the outage is logged once instead of on every poll
-- **FIXED**: Adding an already configured receiver now aborts with "already configured" instead of "Unknown error"
-- **FIXED**: Changing only the name in the integration options is now saved
-- **FIXED**: Changing the host in the integration options no longer creates a new entity. Existing entities are migrated automatically and keep their entity ID
-- **FIXED**: Shuffle now sends the Play_Mode command and reads the shuffle state correctly. It is no longer offered for passive inputs (Optical/Coaxial/CD/Line)
-- **FIXED**: Volume levels are rounded instead of truncated (e.g. 29% no longer becomes 28%)
-- **IMPROVED**: Paused playback is shown as "paused" instead of "idle"
-- **IMPROVED**: Setup and options forms have English and Estonian translations
-- **CHANGED**: Minimum Home Assistant version is now 2024.11.0
-- **TECHNICAL**: Removed dead code and duplicated constants; added tests
-
-### Version 1.4.3 - AirPlay and Coaxial Inputs
-- **FIXED**: Added missing AirPlay and Coaxial inputs to the source mapping. Selecting either input previously raised a KeyError in the update loop, freezing the entity and logging "Error during update: 'AirPlay'" every poll (thanks @Neubda, #5)
-- **IMPROVED**: AirPlay now shows now-playing info and supports transport controls
-- **IMPROVED**: Coaxial is handled like the other passive inputs (Optical/CD/Line)
+### Version 1.5.0 - Discovery, Reliability and Modernization
+- **NEW**: Automatic discovery over SSDP. When the receiver gets a new IP address from DHCP, the configured entry is updated automatically
+- **NEW**: Repeat (off/one/all) for the Server input
+- **NEW**: Volume up/down steps
+- **NEW**: The receiver is added to the device registry
+- **FIXED**: Added missing AirPlay and Coaxial inputs. Selecting either input previously froze the entity with "Error during update: 'AirPlay'" in the log (thanks @Neubda, #5)
+- **FIXED**: Unknown inputs reported by the receiver fall back to their raw name instead of breaking updates
+- **FIXED**: Mute did nothing (the command was sent to the wrong zone and rejected by the receiver)
+- **FIXED**: Shuffle now sends the correct command and shows the correct state; it is no longer offered for passive inputs
+- **FIXED**: Album names are now shown
+- **FIXED**: Media server folders and tracks past the first page opened the wrong item
+- **FIXED**: Browsing a media server that is still waking up no longer fails after 2.5 seconds; a clear error is shown if it does not respond
+- **FIXED**: The entity becomes unavailable when the receiver cannot be reached for 3 polls in a row, instead of keeping its last state forever; the outage is logged once
+- **FIXED**: Adding an already configured receiver aborts with "already configured" instead of "Unknown error"
+- **FIXED**: Changing only the name in the options is saved; changing the host no longer creates a new entity (existing entities are migrated and keep their entity ID)
+- **FIXED**: Volume levels are rounded instead of truncated (29% no longer becomes 28%)
+- **IMPROVED**: Paused playback is shown as "paused"; media server titles with "&" are shown correctly
+- **IMPROVED**: English and Estonian translations; brand icon shown in Home Assistant
+- **CHANGED**: Minimum Home Assistant version is 2024.11.0
+- **TECHNICAL**: Uses current Home Assistant media player APIs (MediaPlayerState, device class, entity naming); tests with a simulated receiver
 
 ### Version 1.4.2 - Media Browsing Standards Compliance
 - **FIXED**: Updated media browsing to use MediaClass instead of MediaType for proper Home Assistant standards compliance

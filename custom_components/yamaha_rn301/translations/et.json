@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Yamaha R-N301",
@@ -8,13 +9,18 @@
           "host": "Host",
           "name": "Nimi"
         }
+      },
+      "confirm": {
+        "title": "Yamaha R-N301",
+        "description": "Kas lisada aadressil {host} leitud Yamaha R-N301?"
       }
     },
     "error": {
       "cannot_connect": "Ressiiveriga ei õnnestunud ühendust luua"
     },
     "abort": {
-      "already_configured": "See ressiiver on juba seadistatud"
+      "already_configured": "See ressiiver on juba seadistatud",
+      "not_supported": "Ressiiver ei teatanud oma seerianumbrit"
     }
   },
   "options": {

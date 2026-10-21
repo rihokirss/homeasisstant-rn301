@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Yamaha R-N301",
@@ -8,13 +9,18 @@
           "host": "Host",
           "name": "Name"
         }
+      },
+      "confirm": {
+        "title": "Yamaha R-N301",
+        "description": "Add the Yamaha R-N301 found at {host}?"
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the receiver"
     },
     "abort": {
-      "already_configured": "This receiver is already configured"
+      "already_configured": "This receiver is already configured",
+      "not_supported": "The receiver did not announce a serial number"
     }
   },
   "options": {
