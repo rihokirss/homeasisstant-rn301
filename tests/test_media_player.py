@@ -1,6 +1,7 @@
 """Tests for the Yamaha R-N301 media player entity."""
 from homeassistant.components.media_player import MediaPlayerEntityFeature
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import (
+    area_registry as ar, device_registry as dr, entity_registry as er, issue_registry as ir)
 from homeassistant.helpers.entity_component import async_update_entity
 
 from custom_components.yamaha_rn301.const import DOMAIN
@@ -241,3 +242,39 @@ async def test_server_browse_error_when_media_server_stays_busy(hass, hass_ws_cl
 
     assert not response["success"]
     assert "did not respond" in response["error"]["message"]
+
+
+async def test_entity_area_moved_to_device(hass, receiver, config_entry):
+    area = ar.async_get(hass).async_create("Arvutituba")
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "media_player", DOMAIN, f"yamaha_rn301_{HOST.replace('.', '_')}",
+        config_entry=config_entry, suggested_object_id="elutuba_yamaha")
+    registry.async_update_entity(old.entity_id, area_id=area.id)
+
+    await setup_entry(hass, config_entry)
+
+    entity = registry.async_get(old.entity_id)
+    assert entity.area_id is None
+    assert dr.async_get(hass).async_get(entity.device_id).area_id == area.id
+    assert not [i for i in ir.async_get(hass).issues.values()
+                if i.translation_key == "entity_own_area_without_own_name"]
+
+
+async def test_entity_area_kept_when_device_in_other_area(hass, receiver, config_entry):
+    areas = ar.async_get(hass)
+    room, other = areas.async_create("Arvutituba"), areas.async_create("Elutuba")
+    device = dr.async_get(hass).async_get_or_create(
+        config_entry_id=config_entry.entry_id, identifiers={(DOMAIN, config_entry.entry_id)})
+    dr.async_get(hass).async_update_device(device.id, area_id=other.id)
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "media_player", DOMAIN, f"yamaha_rn301_{HOST.replace('.', '_')}",
+        config_entry=config_entry, suggested_object_id="elutuba_yamaha")
+    registry.async_update_entity(old.entity_id, area_id=room.id)
+
+    await setup_entry(hass, config_entry)
+
+    # Conflicting areas are left for the user to resolve
+    assert registry.async_get(old.entity_id).area_id == room.id
+    assert dr.async_get(hass).async_get(device.id).area_id == other.id

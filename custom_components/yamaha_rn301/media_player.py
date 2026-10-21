@@ -25,6 +25,7 @@ from homeassistant.const import CONF_HOST, CONF_NAME
 import homeassistant.util.dt as dt_util
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT
@@ -127,6 +128,26 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._session = None
         self._current_preset = None
         self._failed_updates = 0
+
+    async def async_added_to_hass(self) -> None:
+        """Move an area set on the entity to its device.
+
+        Before 1.5.0 there was no device, so an area could only be set on the
+        entity. The entity now represents the device (it has no name of its
+        own), and Home Assistant reports an area on such an entity as an issue.
+        """
+        await super().async_added_to_hass()
+        entity_registry = er.async_get(self.hass)
+        entry = entity_registry.async_get(self.entity_id)
+        if entry is None or entry.area_id is None or entry.device_id is None:
+            return
+        device_registry = dr.async_get(self.hass)
+        device = device_registry.async_get(entry.device_id)
+        # Leave it to the user when the device is already in another area
+        if device is None or device.area_id not in (None, entry.area_id):
+            return
+        device_registry.async_update_device(device.id, area_id=entry.area_id)
+        entity_registry.async_update_entity(self.entity_id, area_id=None)
 
     async def async_update(self) -> None:
         data = await self._do_api_get("<Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone>")

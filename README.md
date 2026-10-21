@@ -97,7 +97,7 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **NEW**: Automatic discovery over SSDP. When the receiver gets a new IP address from DHCP, the configured entry is updated automatically
 - **NEW**: Repeat (off/one/all) for the Server input
 - **NEW**: Volume up/down steps
-- **NEW**: The receiver is added to the device registry
+- **NEW**: The receiver is added to the device registry. An area set on the entity is moved to the device, as Home Assistant now expects
 - **FIXED**: Added missing AirPlay and Coaxial inputs. Selecting either input previously froze the entity with "Error during update: 'AirPlay'" in the log (thanks @Neubda, #5)
 - **FIXED**: Unknown inputs reported by the receiver fall back to their raw name instead of breaking updates
 - **FIXED**: Mute did nothing (the command was sent to the wrong zone and rejected by the receiver)
