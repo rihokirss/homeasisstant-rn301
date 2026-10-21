@@ -642,17 +642,11 @@ class YamahaRn301MP(MediaPlayerEntity):
         parsed = self._parse_list_info(await self._wait_for_list(src))
         items = []
         line = start
-        jumped = False
         while line <= parsed['max_line'] and len(items) < LIST_MAX_ITEMS:
             shown_start = (parsed['current_line'] - 1) // 8 * 8 + 1
             if not shown_start <= line < shown_start + 8:
-                if jumped:
-                    raise BrowseError(f"The receiver did not show line {line}, try again")
-                await self._do_api_put(f'<{src.tag}><List_Control><Jump_Line>{line}</Jump_Line></List_Control></{src.tag}>')
-                parsed = self._parse_list_info(await self._wait_for_list(src))
-                jumped = True
+                parsed = await self._jump_to_line(src, line)
                 continue
-            jumped = False
             items += [item for item in parsed['items'] if int(item['line_id'][5:]) >= line]
             line = shown_start + 8
 
@@ -787,12 +781,25 @@ class YamahaRn301MP(MediaPlayerEntity):
         """Select an item in the current list by its absolute line number."""
         number = int(line_id[5:])
         # Direct_Sel only addresses the 8 lines of the page shown, so first
-        # jump to the page that holds the item. The receiver is busy while it
-        # loads that page (about a second for NET RADIO) and ignores a
-        # selection until it is done.
-        await self._do_api_put(f'<{src.tag}><List_Control><Jump_Line>{number}</Jump_Line></List_Control></{src.tag}>')
-        await self._wait_for_list(src)
+        # jump to the page that holds the item
+        await self._jump_to_line(src, number)
         await self._do_api_put(f'<{src.tag}><List_Control><Direct_Sel>Line_{(number - 1) % 8 + 1}</Direct_Sel></List_Control></{src.tag}>')
+
+    async def _jump_to_line(self, src, line):
+        """Show the page holding a line of the current list and return the list info."""
+        await self._do_api_put(f'<{src.tag}><List_Control><Jump_Line>{line}</Jump_Line></List_Control></{src.tag}>')
+        # The receiver may still report the old page as ready right after the
+        # jump, then is busy while it loads the new one (about half a second
+        # for NET RADIO) and ignores selections until it is done
+        deadline = time.monotonic() + LIST_BUSY_TIMEOUT
+        while True:
+            parsed = self._parse_list_info(await self._wait_for_list(src))
+            shown_start = (parsed['current_line'] - 1) // 8 * 8 + 1
+            if shown_start <= line < shown_start + 8:
+                return parsed
+            if time.monotonic() >= deadline:
+                raise BrowseError(f"The receiver did not show line {line}, try again")
+            await asyncio.sleep(LIST_BUSY_POLL_INTERVAL)
 
     async def _wait_for_list(self, src):
         """Return the current list once the receiver is no longer busy loading it."""

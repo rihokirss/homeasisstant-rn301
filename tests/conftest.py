@@ -61,6 +61,10 @@ class FakeReceiver:
         # Number of List_Info polls answered with Menu_Status Busy after a selection
         self.busy_polls = 0
         self._busy_left = 0
+        # Number of List_Info polls after a Jump_Line that still show the old
+        # page as ready, before the receiver starts loading the new one
+        self.jump_lag_polls = 0
+        self._pending_jump = None
 
     async def handle(self, method, url, data):
         if not self.online or url.host not in self.hosts:
@@ -108,8 +112,7 @@ class FakeReceiver:
         items = node[1]
         page_start = (line - 1) // 8 * 8 + 1
         if (jump := control.findtext("Jump_Line")) is not None:
-            stack[-1] = (node, int(jump))
-            self._busy_left = self.busy_polls
+            self._pending_jump = [stack, int(jump), self.jump_lag_polls]
         elif self._busy_left:
             # Like the real receiver, ignore selections while loading a list
             return
@@ -130,6 +133,14 @@ class FakeReceiver:
             stack.pop()
 
     def _list_info(self, tag):
+        if self._pending_jump:
+            stack, line, lag = self._pending_jump
+            if lag:
+                self._pending_jump[2] -= 1
+            else:
+                stack[-1] = (stack[-1][0], line)
+                self._pending_jump = None
+                self._busy_left = self.busy_polls
         if self._busy_left:
             self._busy_left -= 1
             return f"<{tag}><List_Info><Menu_Status>Busy</Menu_Status></List_Info></{tag}>"
