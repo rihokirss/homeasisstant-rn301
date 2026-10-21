@@ -78,7 +78,7 @@ The receiver's built-in internet radio used the vTuner service, which no longer 
 
 Notes:
 - The receiver cannot play HTTPS streams. Stations that only offer HTTPS (or redirect HTTP to HTTPS) are skipped, and the receiver plays the next working station in the list instead.
-- Radio Browser lists change over time, so a station's position in them can move. For automations, add your stations as YCast bookmarks and play them from **My Stations**. In the YCast app options, bookmarks look like this:
+- Radio Browser lists change over time. Stations are found again by name, but a station that is removed from Radio Browser can no longer be played. For automations it is simplest to add your stations as YCast bookmarks, which show directly under **My Stations**. In the YCast app options, bookmarks look like this:
 
   ```yaml
   bookmarks:
@@ -111,10 +111,12 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 ## Recent Updates
 
 ### Version 1.5.2 - Continuous Browsing
-- **IMPROVED**: NET RADIO and Server folders open as one continuous list instead of pages of 8. Lists read from the receiver are kept for 10 minutes, so going back and forth is instant. Lists longer than 400 entries continue in a "More" view
+- **IMPROVED**: NET RADIO and Server folders open as one continuous list instead of pages of 8. The receiver delivers 8 entries per 0.5–1 s, so a list opened for the first time shows its first entries within about 2 seconds, reads the rest in the background, and offers "Show all". Lists are kept (also across restarts) and open at once from then on; lists older than 10 minutes are refreshed in the background when opened
+- **IMPROVED**: Station and track IDs include the name, so a station is found even after its position in a Radio Browser list changed, e.g. when played from an automation
 - **IMPROVED**: Moving up uses the media browser's own back button instead of a "Back" entry in the list
 - **IMPROVED**: A level that holds only one folder is skipped, so YCast bookmarks show directly under "My Stations"
 - **FIXED**: Playing a station checks that the receiver shows the expected list by name, not only by menu depth
+- **FIXED**: Jumps the receiver ignored or answered late made reading long lists fail or could select an item on the wrong page
 
 ### Version 1.5.1 - NET RADIO Browsing
 - **FIXED**: NET RADIO browsing read the list before the receiver finished loading it, showed only the first 8 entries, and did not return to the main menu. It now uses the same browsing as the Server input: pages, back navigation and waiting for the receiver

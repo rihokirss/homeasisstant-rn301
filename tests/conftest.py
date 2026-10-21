@@ -1,5 +1,6 @@
 """Fixtures for Yamaha R-N301 tests."""
 import asyncio
+import copy
 import re
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
@@ -57,7 +58,10 @@ class FakeReceiver:
         self.station = "Station"
         self.puts = []
         # Menu position per list input: stack of (node, current_line)
-        self.lists = {"SERVER": [(SERVER_TREE, 1)], "NET_RADIO": [(NET_RADIO_TREE, 1)]}
+        # Own copies, so a test can change a list
+        self.server_tree = copy.deepcopy(SERVER_TREE)
+        self.net_radio_tree = copy.deepcopy(NET_RADIO_TREE)
+        self.lists = {"SERVER": [(self.server_tree, 1)], "NET_RADIO": [(self.net_radio_tree, 1)]}
         # Number of List_Info polls answered with Menu_Status Busy after a selection
         self.busy_polls = 0
         self._busy_left = 0

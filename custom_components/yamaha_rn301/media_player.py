@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 from typing import NamedTuple, Optional
+from urllib.parse import quote, unquote
 import asyncio
 import time
 
@@ -22,12 +23,14 @@ except ImportError:
 from homeassistant.components.media_player import (
     MediaPlayerEntityFeature)
 from homeassistant.const import CONF_HOST, CONF_NAME
+from homeassistant.exceptions import HomeAssistantError
 
 import homeassistant.util.dt as dt_util
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT
 
@@ -41,10 +44,14 @@ LIST_BUSY_POLL_INTERVAL = 0.15
 LIST_BUSY_TIMEOUT = 10
 # Seconds before a Jump_Line the receiver did not act on is sent again
 LIST_JUMP_RESEND = 2
-# Items read for one browse view; reading takes about half a second per 8
-LIST_MAX_ITEMS = 400
-# How long a list that was read stays valid for browsing
-LIST_CACHE_SECONDS = 600
+# Seconds spent reading a list that was never read before showing what was
+# read so far; a page of 8 takes 0.5-1 s
+LIST_FIRST_VIEW_BUDGET = 2
+# Lists read longer ago than this are read again in the background when
+# opened, so the next view is current
+LIST_REFRESH_AGE = 600
+# Lists read longer ago than this are dropped from storage
+LIST_STORAGE_MAX_AGE = 30 * 24 * 3600
 
 _BASE_FEATURES = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.VOLUME_MUTE | MediaPlayerEntityFeature.VOLUME_STEP | \
                  MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | MediaPlayerEntityFeature.SELECT_SOURCE
@@ -96,6 +103,18 @@ LIST_SOURCES = {
     'Server': ListSource('SERVER', 'server', MediaClass.TRACK, MediaType.MUSIC, 'No servers available'),
     'Net Radio': ListSource('NET_RADIO', 'netradio', MediaClass.CHANNEL, MediaType.CHANNEL, 'No stations available'),
 }
+
+def _path_part(item):
+    """Media ID part for a list item: its line number and, to find it again
+    after the list changed, its name."""
+    return f"{item['line_id']}~{quote(item['title'], safe='')}"
+
+
+def _split_part(part):
+    """Line number and name of a media ID part; IDs from before 1.5.2 have no name."""
+    line_id, _, title = part.partition("~")
+    return int(line_id[5:]), unquote(title) if title else None
+
 
 REPEAT_MAPPING = {
     RepeatMode.OFF: 'Off',
@@ -156,17 +175,32 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._failed_updates = 0
         # (menu path, menu name) of the list the receiver shows, per list source tag
         self._list_paths = {}
-        # Lists read for browsing: (tag, path, start line) -> (time, listing)
+        # Lists read for browsing: "tag|path" -> {'time': ..., 'listing': ...}
         self._list_cache = {}
+        self._list_store = None
+        # The receiver has one menu position per input: one list operation at a time
+        self._list_lock = asyncio.Lock()
+        # (cache key, task) of the list being read in the background
+        self._list_task = None
+
+    async def async_will_remove_from_hass(self) -> None:
+        await self._cancel_list_task()
+        if self._list_store is not None:
+            await self._list_store.async_save(self._list_cache)
 
     async def async_added_to_hass(self) -> None:
-        """Move an area set on the entity to its device.
+        """Load the browsing lists kept from before, and move an area set on the entity to its device.
 
         Before 1.5.0 there was no device, so an area could only be set on the
         entity. The entity now represents the device (it has no name of its
         own), and Home Assistant reports an area on such an entity as an issue.
         """
         await super().async_added_to_hass()
+        self._list_store = Store(self.hass, 1, f"{DOMAIN}.{self._unique_id}.lists")
+        stored = await self._list_store.async_load() or {}
+        self._list_cache = {key: entry for key, entry in stored.items()
+                            if time.time() - entry['time'] < LIST_STORAGE_MAX_AGE}
+
         entity_registry = er.async_get(self.hass)
         entry = entity_registry.async_get(self.entity_id)
         if entry is None or entry.area_id is None or entry.device_id is None:
@@ -567,48 +601,56 @@ class YamahaRn301MP(MediaPlayerEntity):
         try:
             if media_content_id is None or media_content_id == f"{src.prefix}_root":
                 return await self._browse_list(src, f"{src.prefix}_root")
-            if media_content_id.startswith(f"{src.prefix}_more:"):
-                _, start, menu_id = media_content_id.split(":", 2)
-                return await self._browse_list(src, menu_id, int(start))
+            if media_content_id.startswith(f"{src.prefix}_all:"):
+                return await self._browse_list(src, media_content_id.split(":", 1)[1], show_all=True)
             if media_content_id.startswith(f"{src.prefix}_menu:root:"):
                 return await self._browse_list(src, media_content_id)
             raise BrowseError(f"Unknown media ID {media_content_id}")
-        except BrowseError:
+        except HomeAssistantError:
             raise
         except Exception as e:
             _LOGGER.exception("Error browsing %s media: %s", src.tag, e)
             raise BrowseError(f"Browsing {self._source} failed") from e
 
-    async def _browse_list(self, src, menu_id, start=1):
+    async def _browse_list(self, src, menu_id, show_all=False):
         """Browse a NET RADIO or SERVER folder as one continuous list.
 
-        The receiver only shows 8 lines at a time, so the whole list is read
-        page by page (about half a second per page) and kept for a while, so
-        going back and forth between folders does not read it again. Moving
-        up is left to the media browser's own back navigation.
+        The receiver shows 8 lines at a time and takes 0.5-1 s per page, and
+        the media browser cannot load a list bit by bit. So a list that was
+        never read shows what could be read in LIST_FIRST_VIEW_BUDGET seconds,
+        the rest is read in the background, and "Show all" shows it whole.
+        Lists are kept, also across restarts, so they open at once next time;
+        old ones are read again in the background. Moving up is left to the
+        media browser's own back navigation.
         """
         path = menu_id.split(":")[2:]
-        key = (src.tag, tuple(path), start)
-        cached = self._list_cache.get(key)
-        if cached and time.monotonic() - cached[0] < LIST_CACHE_SECONDS:
-            listing = cached[1]
-        else:
-            await self._show_list(src, path)
-            listing = await self._read_list(src, start)
-            self._list_cache[key] = (time.monotonic(), listing)
+        key = f"{src.tag}|{':'.join(path)}"
+        if show_all and self._list_task and self._list_task[0] == key:
+            # The rest of this list is being read: wait for it
+            await asyncio.wait([self._list_task[1]])
+        await self._cancel_list_task()
+
+        entry = self._list_cache.get(key)
+        if entry is None or (show_all and not entry['listing']['complete']):
+            async with self._list_lock:
+                await self._show_list(src, path)
+                listing = await self._read_list(
+                    src, entry['listing'] if entry else None, None if show_all else LIST_FIRST_VIEW_BUDGET)
+            entry = self._store_list(key, listing)
+        listing = entry['listing']
 
         # Skip a level that holds nothing but one folder, such as YCast's
         # "My Stations" with its single "Bookmarks" category, or a media
         # server list with one server
         items = listing['items']
-        if start == 1 and not listing['next_line'] and len(items) == 1 and items[0]['attribute'] == "Container":
-            only = await self._browse_list(src, f"{src.prefix}_menu:root:{':'.join(path + [items[0]['line_id']])}")
+        if listing['complete'] and len(items) == 1 and items[0]['attribute'] == "Container":
+            only = await self._browse_list(src, f"{src.prefix}_menu:root:{':'.join(path + [_path_part(items[0])])}")
             only.media_content_id = menu_id
             only.title = listing['menu_name'] or only.title
             return only
 
-        children = self._create_browse_media_children(src, listing['items'], ":".join(path), listing['menu_layer'])
-        if not children and listing['menu_layer'] == 1:
+        children = self._create_browse_media_children(src, items, path, listing['menu_layer'])
+        if not children and listing['complete'] and listing['menu_layer'] == 1:
             children.append(BrowseMedia(
                 media_class=MediaClass.DIRECTORY,
                 media_content_id="empty",
@@ -617,48 +659,101 @@ class YamahaRn301MP(MediaPlayerEntity):
                 can_play=False,
                 can_expand=False,
             ))
-        if listing['next_line']:
-            # Very long lists continue in a further view
-            last = min(listing['next_line'] + LIST_MAX_ITEMS - 1, listing['max_line'])
+        if not listing['complete']:
             children.append(BrowseMedia(
                 media_class=MediaClass.DIRECTORY,
-                media_content_id=f"{src.prefix}_more:{listing['next_line']}:{menu_id}",
+                media_content_id=f"{src.prefix}_all:{menu_id}",
                 media_content_type="folder",
-                title=f"⬇️ More ({listing['next_line']}–{last} of {listing['max_line']})",
+                title=f"⬇️ Show all {listing['max_line']}",
                 can_play=False,
                 can_expand=True,
             ))
 
-        return BrowseMedia(
+        result = BrowseMedia(
             media_class=MediaClass.DIRECTORY,
-            media_content_id=menu_id if start == 1 else f"{src.prefix}_more:{start}:{menu_id}",
+            media_content_id=f"{src.prefix}_all:{menu_id}" if show_all else menu_id,
             media_content_type="folder",
             title=listing['menu_name'] or self._source,
             can_play=False,
             can_expand=True,
             children=children,
         )
+        # Started last: the task may run eagerly up to its first wait
+        if not listing['complete'] or time.time() - entry['time'] > LIST_REFRESH_AGE:
+            self._start_list_task(src, key, path)
+        return result
 
-    async def _read_list(self, src, start=1):
-        """Read the list the receiver shows from line start on, up to LIST_MAX_ITEMS items."""
+    async def _read_list(self, src, listing=None, budget=None):
+        """Read the list the receiver shows, continuing listing if it was read in part.
+
+        Stops after budget seconds, or at the end when budget is None. The
+        listing is updated page by page, so a read that is cancelled keeps
+        what it read.
+        """
         parsed = self._parse_list_info(await self._wait_for_list(src))
-        items = []
-        line = start
-        while line <= parsed['max_line'] and len(items) < LIST_MAX_ITEMS:
+        if listing is None or listing['max_line'] != parsed['max_line']:
+            listing = {
+                'menu_name': parsed['menu_name'],
+                'menu_layer': parsed['menu_layer'],
+                'max_line': parsed['max_line'],
+                'items': [],
+                'next_line': 1,
+                'complete': False,
+            }
+        deadline = None if budget is None else time.monotonic() + budget
+        line = listing['next_line']
+        while line <= parsed['max_line']:
+            if deadline is not None and listing['items'] and time.monotonic() >= deadline:
+                break
             shown_start = (parsed['current_line'] - 1) // 8 * 8 + 1
             if not shown_start <= line < shown_start + 8:
                 parsed = await self._jump_to_line(src, line)
                 continue
-            items += [item for item in parsed['items'] if int(item['line_id'][5:]) >= line]
+            listing['items'].extend(item for item in parsed['items'] if int(item['line_id'][5:]) >= line)
             line = shown_start + 8
+            listing['next_line'] = line
+        listing['complete'] = line > parsed['max_line']
+        return listing
 
-        return {
-            'menu_name': parsed['menu_name'],
-            'menu_layer': parsed['menu_layer'],
-            'max_line': parsed['max_line'],
-            'items': items,
-            'next_line': line if line <= parsed['max_line'] else None,
-        }
+    def _store_list(self, key, listing):
+        """Keep a listing for browsing and save it for after a restart."""
+        entry = self._list_cache[key] = {'time': time.time(), 'listing': listing}
+        if self._list_store is not None:
+            self._list_store.async_delay_save(lambda: self._list_cache, 10)
+        return entry
+
+    def _start_list_task(self, src, key, path):
+        """Read the rest of a list, or all of an old one, in the background."""
+        self._list_task = (key, self.hass.async_create_background_task(
+            self._read_list_in_background(src, key, path), f"{DOMAIN} read {key}"))
+
+    async def _read_list_in_background(self, src, key, path):
+        entry = self._list_cache[key]
+        try:
+            async with self._list_lock:
+                await self._show_list(src, path)
+                if entry['listing']['complete']:
+                    # Read an old list again; it is shown until the new one is done
+                    listing = await self._read_list(src)
+                else:
+                    listing = await self._read_list(src, entry['listing'])
+            self._store_list(key, listing)
+        except asyncio.CancelledError:
+            # The receiver may have stopped anywhere on the way
+            self._list_paths.pop(src.tag, None)
+            if self._list_store is not None:
+                self._list_store.async_delay_save(lambda: self._list_cache, 10)
+            raise
+        except HomeAssistantError as err:
+            _LOGGER.debug("Reading %s in the background failed: %s", key, err)
+
+    async def _cancel_list_task(self):
+        """Stop a background read; the receiver's menu is needed for something else."""
+        if self._list_task is not None:
+            task = self._list_task[1]
+            self._list_task = None
+            task.cancel()
+            await asyncio.wait([task])
 
     async def _show_list(self, src, path):
         """Make the receiver show the list at path, walking there from the root if needed."""
@@ -676,14 +771,16 @@ class YamahaRn301MP(MediaPlayerEntity):
             _LOGGER.warning("Could not extract line_id from %s", media_id)
             return
 
-        # A stored media ID played from an automation may find the receiver
-        # showing another list
-        await self._show_list(src, parts[2:-1])
-        await self._select_list_line(src, parts[-1])
-        await asyncio.sleep(0.2)
+        await self._cancel_list_task()
+        async with self._list_lock:
+            # A stored media ID played from an automation may find the
+            # receiver showing another list
+            await self._show_list(src, parts[2:-1])
+            await self._select_list_line(src, parts[-1])
+            await asyncio.sleep(0.2)
 
-        # Start playing
-        await self._do_api_put(f'<{src.tag}><Play_Control><Playback>Play</Playback></Play_Control></{src.tag}>')
+            # Start playing
+            await self._do_api_put(f'<{src.tag}><Play_Control><Playback>Play</Playback></Play_Control></{src.tag}>')
 
     def _parse_list_info(self, data):
         """Parse a List_Info response"""
@@ -734,12 +831,12 @@ class YamahaRn301MP(MediaPlayerEntity):
             'items': items
         }
 
-    def _create_browse_media_children(self, src, items, base_path="", menu_layer=1):
+    def _create_browse_media_children(self, src, items, base_path, menu_layer=1):
         """Create BrowseMedia children from parsed items"""
         children = []
 
         for item in items:
-            path = f"{base_path}:{item['line_id']}" if base_path else item['line_id']
+            path = ":".join(base_path + [_path_part(item)])
             if item['attribute'] == "Container":
                 # Folder/Album - extend current path
                 media_type = "album" if src.tag == "SERVER" and menu_layer > 4 else "folder"
@@ -779,12 +876,21 @@ class YamahaRn301MP(MediaPlayerEntity):
 
         return await self._wait_for_list(src)
 
-    async def _select_list_line(self, src, line_id):
-        """Select an item in the current list by its absolute line number."""
-        number = int(line_id[5:])
+    async def _select_list_line(self, src, part):
+        """Select an item in the current list by a media ID part (line number and name)."""
+        number, title = _split_part(part)
         # Direct_Sel only addresses the 8 lines of the page shown, so first
         # jump to the page that holds the item
-        await self._jump_to_line(src, number)
+        parsed = await self._jump_to_line(src, number)
+        if title is not None and title not in (
+                item['title'] for item in parsed['items'] if item['line_id'] == f"Line_{number}"):
+            # The list changed since the media ID was made, e.g. stations were
+            # added to a Radio Browser list: find the item by its name
+            number = next((int(item['line_id'][5:]) for item in (await self._read_list(src))['items']
+                           if item['title'] == title), None)
+            if number is None:
+                raise HomeAssistantError(f"{title} is no longer in the {self._source} list")
+            await self._jump_to_line(src, number)
         await self._do_api_put(f'<{src.tag}><List_Control><Direct_Sel>Line_{(number - 1) % 8 + 1}</Direct_Sel></List_Control></{src.tag}>')
 
     async def _jump_to_line(self, src, line):

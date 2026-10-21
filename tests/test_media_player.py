@@ -235,17 +235,74 @@ async def test_server_play_after_cached_browse(hass, hass_ws_client, receiver, c
     assert receiver.song == "Track 1.3"
 
 
-async def test_long_list_continues_in_more_view(hass, hass_ws_client, receiver, config_entry, monkeypatch):
-    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.LIST_MAX_ITEMS", 8)
+async def test_long_list_first_view_and_show_all(hass, hass_ws_client, receiver, config_entry, monkeypatch):
+    # Only the first page fits in the time for the first view
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.LIST_FIRST_VIEW_BUDGET", 0)
     await setup_entry(hass, config_entry)
 
     music = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
-    assert "Folder 8" in music and "Folder 10" not in music
-    more = await _browse(hass, hass_ws_client, music["⬇️ More (9–10 of 10)"])
+    assert list(music) == [f"Folder {i}" for i in range(1, 9)] + ["⬇️ Show all 10"]
 
-    assert list(_children(more)) == ["Above & Beyond", "Folder 10"]
-    folder = await _browse(hass, hass_ws_client, _children(more)["Folder 10"])
-    assert folder["result"]["title"] == "Folder 10"
+    # The rest is read in the background meanwhile
+    full = await _browse(hass, hass_ws_client, music["⬇️ Show all 10"])
+    assert full["result"]["title"] == "Music"
+    assert list(_children(full))[-2:] == ["Above & Beyond", "Folder 10"]
+
+    # From now on the list opens whole
+    assert len(_children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))) == 10
+
+
+async def test_browsing_elsewhere_stops_background_read(hass, hass_ws_client, receiver, config_entry, monkeypatch):
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.LIST_FIRST_VIEW_BUDGET", 0)
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    receiver.busy_polls = 2
+
+    genres = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_1"))
+    assert "⬇️ Show all 11" in genres
+    estonia = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_2:Line_1"))
+
+    assert list(estonia) == ["Raadio 2", "Vikerraadio"]
+    full = _children(await _browse(hass, hass_ws_client, genres["⬇️ Show all 11"]))
+    assert list(full) == [f"Genre {i}" for i in range(1, 12)]
+
+
+async def test_lists_are_kept_across_restarts(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    music = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
+
+    assert await hass.config_entries.async_reload(config_entry.entry_id)
+    await hass.async_block_till_done()
+    receiver.puts.clear()
+
+    assert _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1")) == music
+    assert receiver.puts == []
+
+
+async def test_old_list_is_read_again_in_background(hass, hass_ws_client, receiver, config_entry, monkeypatch):
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.LIST_REFRESH_AGE", 0)
+    await setup_entry(hass, config_entry)
+    await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1")
+    await hass.async_block_till_done(wait_background_tasks=True)
+    music = receiver.server_tree[1][0][1][0][1]
+    music.append(("New Folder", []))
+
+    # The old list is shown at once and read again for next time
+    assert "New Folder" not in _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert "New Folder" in _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1"))
+
+
+async def test_play_finds_station_after_list_changed(hass, hass_ws_client, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    estonia = _children(await _browse(hass, hass_ws_client, "netradio_menu:root:Line_1:Line_2:Line_1"))
+    # A station is added at the top of the Radio Browser list later on
+    receiver.net_radio_tree[1][0][1][1][1][0][1].insert(0, ("Elmar", None))
+
+    await _call(hass, "play_media", media_content_id=estonia["Vikerraadio"], media_content_type="channel")
+
+    assert receiver.station == "Vikerraadio"
 
 
 async def test_server_play_track_on_page_two(hass, hass_ws_client, receiver, config_entry):
