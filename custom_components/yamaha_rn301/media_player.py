@@ -375,9 +375,13 @@ class YamahaRn301MP(MediaPlayerEntity):
         await self._set_power_state(False)
 
     async def async_set_volume_level(self, volume):
+        """Set the volume, clamped to the receiver's 0-100 range."""
+        # The receiver's scale is 0-100 and rejects values outside it
+        # (RC=5, "parameter out of range"), so clamp instead of sending them.
+        value = max(0, min(100, round(volume * 100)))
         await self._do_api_put(
             '<Main_Zone><Volume><Lvl><Val>{0}</Val><Exp>0</Exp><Unit></Unit></Lvl></Volume></Main_Zone>'.format(
-                round(volume * 100)))
+                value))
 
     async def async_select_source(self, source):
         await self._do_api_put(
