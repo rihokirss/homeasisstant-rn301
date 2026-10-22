@@ -111,6 +111,11 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 
 ## Recent Updates
 
+### Version 1.6.1 - Device Info
+- **IMPROVED**: The device page shows the receiver's firmware version and serial number (thanks @Neubda, #10)
+- **CODE**: Unused setup code was removed (thanks @Neubda, #9)
+- **DOCS**: The README credits the component this integration started from
+
 ### Version 1.6.0 - Command Feedback
 - **CHANGED**: A command the receiver does not carry out now fails with a message instead of silently doing nothing, for example "The receiver is in standby" or "Cannot reach the receiver". An automation that sends a command to the receiver in standby now stops with that error
 - **FIXED**: Commands sent right after turning the receiver on, for example setting the volume in the same automation, were refused while it started up. They are now sent again for up to 3 seconds
