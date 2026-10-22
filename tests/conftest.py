@@ -59,6 +59,9 @@ class FakeReceiver:
         self.repeat = "Off"
         self.song = "Song"
         self.station = "Station"
+        # Stored Tuner presets and the one selected
+        self.presets = [str(i) for i in range(1, 9)]
+        self.preset = "2"
         self.puts = []
         # Menu position per list input: stack of (node, current_line)
         # Own copies, so a test can change a list
@@ -97,6 +100,8 @@ class FakeReceiver:
             body = f"<System><Config><Model_Name>R-N301</Model_Name><System_ID>{self.serial}</System_ID></Config></System>"
         elif section.tag == "Main_Zone" and section.find("Basic_Status") is not None:
             body = self._basic_status()
+        elif section.tag == "Tuner" and section.find("Play_Control/Preset/Preset_Sel_Item") is not None:
+            body = self._preset_items()
         elif section.tag in self.lists and section.find("List_Info") is not None:
             body = self._list_info(section.tag)
         elif section.find("Play_Info") is not None:
@@ -138,7 +143,17 @@ class FakeReceiver:
         if (repeat := section.findtext("Play_Control/Play_Mode/Repeat")) is not None:
             self.repeat = repeat
         if (playback := section.findtext("Play_Control/Playback")) is not None:
-            self.playback = playback
+            # Like the real receiver, Play does not start again after Stop,
+            # which clears the song
+            if playback == "Stop":
+                self.song = ""
+            if not (playback == "Play" and self.playback == "Stop"):
+                self.playback = playback
+        if (preset := section.findtext("Play_Control/Preset/Preset_Sel")) is not None:
+            if preset == "0":
+                return "3"
+            if preset in self.presets:
+                self.preset = preset
         if section.tag in self.lists and section.find("List_Control") is not None:
             return self._list_control(self.lists[section.tag], section.find("List_Control"))
         return None
@@ -217,7 +232,21 @@ class FakeReceiver:
             "</Basic_Status></Main_Zone>"
         )
 
+    def _preset_items(self):
+        items = "<Item_1><Param>No Preset</Param><RW>R</RW><Title></Title></Item_1>"
+        for i, preset in enumerate(self.presets, 2):
+            items += f"<Item_{i}><Param>{preset}</Param><RW>RW</RW><Title>{preset} : FM 97.80 MHz</Title></Item_{i}>"
+        return f"<Tuner><Play_Control><Preset><Preset_Sel_Item>{items}</Preset_Sel_Item></Preset></Play_Control></Tuner>"
+
     def _play_info(self, tag):
+        if tag == "Tuner":
+            return (
+                "<Tuner><Play_Info><Feature_Availability>Ready</Feature_Availability>"
+                f"<Search_Mode>Preset</Search_Mode><Preset><Preset_Sel>{self.preset}</Preset_Sel></Preset>"
+                "<Tuning><Band>FM</Band><Freq><Current><Val>9780</Val><Exp>2</Exp><Unit>MHz</Unit></Current></Freq></Tuning>"
+                "<Signal_Info><Tuned>Assert</Tuned><Stereo>Assert</Stereo></Signal_Info>"
+                "</Play_Info></Tuner>"
+            )
         if tag == "NET_RADIO":
             meta = f"<Station>{escape(self.station)}</Station><Album></Album><Song>Artist - Song</Song>"
         else:

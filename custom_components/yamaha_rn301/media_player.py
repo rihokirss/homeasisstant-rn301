@@ -179,6 +179,10 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._failed_updates = 0
         # time.monotonic() when the receiver was last turned on
         self._turned_on_at = None
+        # The Server track playing last, and the folders tracks were played
+        # from in Home Assistant per list source tag, to select it again after Stop
+        self._last_song = None
+        self._played_from = {}
         # (menu path, menu name) of the list the receiver shows, per list source tag
         self._list_paths = {}
         # Lists read for browsing: "tag|path" -> {'time': ..., 'listing': ...}
@@ -401,6 +405,10 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def async_media_play(self):
         """Play media"""
+        if self._source == "Server" and self._pwstate == MediaPlayerState.IDLE and self._last_song:
+            # After Stop the receiver ignores Play: select the track again
+            await self._play_last_track(LIST_SOURCES["Server"])
+            return
         await self._media_play_control("Play")
 
     async def async_media_pause(self):
@@ -413,13 +421,13 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def async_media_next_track(self):
         if self._source == "Tuner":
-            await self._next_preset()
+            await self._step_preset(1)
         else:
             await self._media_play_control("Skip Fwd")
 
     async def async_media_previous_track(self):
         if self._source == "Tuner":
-            await self._previous_preset()
+            await self._step_preset(-1)
         else:
             await self._media_play_control("Skip Rev")
 
@@ -585,6 +593,8 @@ class YamahaRn301MP(MediaPlayerEntity):
                                 self._current_preset = preset_node.text
                     except Exception as e:
                         _LOGGER.warning("Error parsing media node: %s", e)
+                if self._device_source == "SERVER" and self._media_playing and self._media_meta.get('song'):
+                    self._last_song = self._media_meta['song']
 
             else:
                 self._nullify_media_fields()
@@ -593,37 +603,24 @@ class YamahaRn301MP(MediaPlayerEntity):
         except Exception as e:
             _LOGGER.exception("Error updating media info: %s", e)
 
-    async def _next_preset(self):
-        """Switch to next preset (1-8, cycle back to 1)"""
+    async def _step_preset(self, step):
+        """Select the next (step 1) or previous (step -1) stored Tuner preset."""
+        data = await self._do_api_get(
+            '<Tuner><Play_Control><Preset><Preset_Sel_Item>GetParam</Preset_Sel_Item></Preset></Play_Control></Tuner>')
         try:
-            if self._current_preset:
-                current = int(self._current_preset)
-            else:
-                current = 1
-            
-            next_preset = (current % 8) + 1  # Cycle 1-8
-            
-            await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{next_preset}</Preset_Sel></Preset></Play_Control></Tuner>')
-            self._current_preset = str(next_preset)
-            await self.async_update()
-        except (ValueError, TypeError) as e:
-            _LOGGER.warning("Error switching to next preset: %s", e)
-
-    async def _previous_preset(self):
-        """Switch to previous preset (1-8, cycle back to 8)"""
-        try:
-            if self._current_preset:
-                current = int(self._current_preset)
-            else:
-                current = 1
-            
-            prev_preset = ((current - 2) % 8) + 1  # Cycle 1-8
-            
-            await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{prev_preset}</Preset_Sel></Preset></Play_Control></Tuner>')
-            self._current_preset = str(prev_preset)
-            await self.async_update()
-        except (ValueError, TypeError) as e:
-            _LOGGER.warning("Error switching to previous preset: %s", e)
+            items = ET.fromstring(data).find('Tuner/Play_Control/Preset/Preset_Sel_Item')
+        except ET.ParseError as e:
+            raise HomeAssistantError(f"Cannot read the presets from the receiver at {self._host}") from e
+        # The first item, "No Preset", is read-only; the others are the stored presets
+        presets = [item.findtext('Param') for item in items if item.findtext('RW') == 'RW'] if items is not None else []
+        if not presets:
+            raise HomeAssistantError("The receiver has no Tuner presets stored")
+        if self._current_preset in presets:
+            preset = presets[(presets.index(self._current_preset) + step) % len(presets)]
+        else:
+            preset = presets[0 if step > 0 else -1]
+        await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{preset}</Preset_Sel></Preset></Play_Control></Tuner>')
+        self._current_preset = preset
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Browse the NET RADIO and SERVER menus"""
@@ -828,6 +825,27 @@ class YamahaRn301MP(MediaPlayerEntity):
 
             # Start playing
             await self._do_api_put(f'<{src.tag}><Play_Control><Playback>Play</Playback></Play_Control></{src.tag}>')
+        self._played_from[src.tag] = parts[2:-1]
+
+    async def _play_last_track(self, src):
+        """Select the track that played last again, as the receiver ignores Play after Stop."""
+        title = self._last_song
+        folder = self._played_from.get(src.tag)
+        # Tracks play on through their folder, so the track is in the folder
+        # played from in Home Assistant, if that list was read whole
+        entry = self._list_cache.get(f"{src.tag}|{':'.join(folder)}") if folder is not None else None
+        line = next((int(item['line_id'][5:]) for item in entry['listing']['items']
+                     if item['title'] == title), None) if entry else None
+        await self._cancel_list_task()
+        async with self._list_lock:
+            if line is not None:
+                await self._show_list(src, folder)
+            else:
+                # Played from the receiver: its menu still shows the folder
+                # the track was selected in, unless it was moved since
+                line = self._parse_list_info(await self._wait_for_list(src))['current_line']
+            # Selecting a track starts playing it
+            await self._select_list_line(src, f"Line_{line}~{quote(title, safe='')}")
 
     def _parse_list_info(self, data):
         """Parse a List_Info response"""

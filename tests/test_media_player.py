@@ -226,6 +226,28 @@ async def test_pause_state(hass, receiver, config_entry):
     assert hass.states.get(ENTITY_ID).state == "paused"
 
 
+async def test_tuner_presets_step_through_stored_presets(hass, receiver, config_entry):
+    receiver.input = "TUNER"
+    receiver.presets = ["1", "2", "5"]
+    await setup_entry(hass, config_entry)
+
+    await _call(hass, "media_next_track")
+    assert receiver.preset == "5"
+    await _call(hass, "media_next_track")
+    assert receiver.preset == "1"
+    await _call(hass, "media_previous_track")
+    assert receiver.preset == "5"
+
+
+async def test_tuner_without_presets(hass, receiver, config_entry):
+    receiver.input = "TUNER"
+    receiver.presets = []
+    await setup_entry(hass, config_entry)
+
+    with pytest.raises(HomeAssistantError, match="no Tuner presets"):
+        await _call(hass, "media_next_track")
+
+
 async def test_select_source(hass, receiver, config_entry):
     await setup_entry(hass, config_entry)
 
@@ -368,6 +390,42 @@ async def test_play_finds_station_after_list_changed(hass, hass_ws_client, recei
     await _call(hass, "play_media", media_content_id=estonia["Vikerraadio"], media_content_type="channel")
 
     assert receiver.station == "Vikerraadio"
+
+
+async def test_server_play_after_stop_selects_track_again(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    folder = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
+    await _call(hass, "play_media", media_content_id=folder["Track 1.2"], media_content_type="music")
+    # The receiver plays on to the next track of the folder
+    receiver.song = "Track 1.3"
+    await async_update_entity(hass, ENTITY_ID)
+
+    await _call(hass, "media_pause")
+    await _call(hass, "media_play")
+    assert receiver.playback == "Play"
+
+    await _call(hass, "media_stop")
+    assert hass.states.get(ENTITY_ID).state == "idle"
+    # Browsing a list not read before moves the receiver's menu
+    await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_2")
+    await _call(hass, "media_play")
+
+    assert (receiver.playback, receiver.song) == ("Play", "Track 1.3")
+    assert hass.states.get(ENTITY_ID).state == "playing"
+
+
+async def test_server_play_after_stop_of_track_started_on_receiver(hass, receiver, config_entry):
+    tree = receiver.server_tree
+    ketas = tree[1][0]
+    music = ketas[1][0]
+    receiver.lists["SERVER"] = [(tree, 1), (ketas, 1), (music, 1), (music[1][1], 4)]
+    receiver.song = "Track 2.4"
+    await setup_entry(hass, config_entry)
+
+    await _call(hass, "media_stop")
+    await _call(hass, "media_play")
+
+    assert (receiver.playback, receiver.song) == ("Play", "Track 2.4")
 
 
 async def test_server_play_track_on_page_two(hass, hass_ws_client, receiver, config_entry):

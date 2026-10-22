@@ -11,7 +11,7 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 - **Source Selection**: Choose between inputs like Optical, CD, Line, and more
 - **Media Playback**: Control media playback including play, pause, stop and track navigation, and shuffle and repeat for the Server input
 - **Enhanced Media Information**: Display track info, station names, and frequencies
-- **TUNER Preset Support**: Switch between radio presets using next/previous buttons (works even without signal lock)
+- **TUNER Preset Support**: Switch between the presets stored on the receiver using next/previous buttons (works even without signal lock)
 - **Media Server Browsing**: Browse DLNA media servers (SERVER input) and play tracks directly in Home Assistant
 - **NET RADIO Browse Media**: Browse and select internet radio stations directly in Home Assistant
 - **Automatic Discovery**: Home Assistant finds the receiver on your network (SSDP) and offers to add it
@@ -115,6 +115,8 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **IMPROVED**: A command the receiver does not carry out now fails with a message instead of silently doing nothing, for example "The receiver is in standby" or "Cannot reach the receiver"
 - **FIXED**: Commands sent right after turning the receiver on, for example setting the volume in the same automation, were refused while it started up. They are now sent again for up to 3 seconds
 - **FIXED**: Shuffle is no longer offered for Spotify and AirPlay; the receiver has no shuffle for these inputs
+- **FIXED**: Play after Stop on the Server input did nothing, because the receiver ignores it. The integration now selects the last track again
+- **FIXED**: Next and previous on the Tuner step through the presets stored on the receiver. They counted 1 to 8 before and got stuck when fewer presets were stored
 - **DOCS**: The API reference was checked against a real R-N301 and corrected: response codes, power, inputs, playback per input, list timing and the Tuner
 
 ### Version 1.5.2 - Continuous Browsing
@@ -218,7 +220,6 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - "The receiver is in standby": turn the receiver on first. Volume, mute, playback and browsing need it on.
 - "Cannot reach the receiver": check that the receiver is connected and its IP address is correct.
 - "The receiver does not accept this value": the receiver refused the value, for example an input it does not have.
-- After **Stop**, **Play** does not start a Server track again (the receiver ignores it): play the track from the media browser again.
 
 **Setup Problems:**
 - Try restarting Home Assistant after installation
