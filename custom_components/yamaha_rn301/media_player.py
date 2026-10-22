@@ -213,6 +213,10 @@ class YamahaRn301MP(MediaPlayerEntity):
         # input was last selected
         self._turned_on_at = None
         self._selected_at = None
+        # Cache the song/frequency toggle to avoid calling
+        # datetime.now() on every media_title property access
+        self._freq_toggle = False       # True=show song, False=show frequency
+        self._toggle_updated_at = 0.0    # timestamp of last toggle
         # The Server track playing last, and the folders tracks were played
         # from in Home Assistant per list source tag, to select it again after Stop
         self._last_song = None
@@ -364,7 +368,12 @@ class YamahaRn301MP(MediaPlayerEntity):
             
             return title
         elif "song" in self._media_meta and "frequency" in self._media_meta:
-            return self._media_meta["song"] if datetime.now().second < 20 else self._media_meta["frequency"]
+            # Toggle between song and frequency once per second
+            now = time.time()
+            if now - self._toggle_updated_at >= 1.0:
+                self._toggle_updated_at = now
+                self._freq_toggle = not self._freq_toggle
+            return self._media_meta["song"] if self._freq_toggle else self._media_meta["frequency"]
         elif "song" in self._media_meta:
             return self._media_meta.get("song")
         elif "frequency" in self._media_meta:
