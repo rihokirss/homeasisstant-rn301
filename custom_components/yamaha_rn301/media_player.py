@@ -40,6 +40,8 @@ MAX_FAILED_UPDATES = 3
 # about half a second, a media server waking up several seconds
 LIST_BUSY_POLL_INTERVAL = 0.15
 LIST_BUSY_TIMEOUT = 10
+# How often to refresh Play_Info (seconds); Basic_Status polls every scan_interval
+PLAY_INFO_THROTTLE = 5
 # Seconds before a Jump_Line the receiver did not act on is sent again
 LIST_JUMP_RESEND = 2
 # Seconds spent reading a list that was never read before showing what was
@@ -171,6 +173,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._session = None
         self._current_preset = None
         self._failed_updates = 0
+        self._last_play_info_update = 0
         # (menu path, menu name) of the list the receiver shows, per list source tag
         self._list_paths = {}
         # Lists read for browsing: "tag|path" -> {'time': ..., 'listing': ...}
@@ -240,6 +243,15 @@ class YamahaRn301MP(MediaPlayerEntity):
                     txt = node.find("Input_Sel").text
                     self._source = self._reverse_mapping.get(txt, txt)
                     self._device_source = txt.replace(" ", "_")
+            # Only refresh Play_Info every PLAY_INFO_THROTTLE seconds
+            now = time.monotonic()
+            if now - self._last_play_info_update >= PLAY_INFO_THROTTLE:
+                await self._update_media_playing()
+                self._last_play_info_update = now
+            elif self._pwstate != MediaPlayerState.OFF:
+                # Still update basic state, but skip Play_Info
+                await self._do_api_get("<Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone>")
+                # ... rest of update logic without _update_media_playing()
             if self._pwstate != MediaPlayerState.OFF:
                 await self._update_media_playing()
         except ET.ParseError as e:
@@ -558,6 +570,7 @@ class YamahaRn301MP(MediaPlayerEntity):
 
             else:
                 self._nullify_media_fields()
+        self._last_play_info_update = time.monotonic()
         except ET.ParseError as e:
             _LOGGER.error("Failed to parse XML response in media update: %s", e)
         except Exception as e:
