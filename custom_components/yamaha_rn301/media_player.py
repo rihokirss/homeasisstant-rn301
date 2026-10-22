@@ -405,8 +405,11 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def async_media_play(self):
         """Play media"""
-        if self._source == "Server" and self._pwstate == MediaPlayerState.IDLE and self._last_song:
-            # After Stop the receiver ignores Play: select the track again
+        if self._source == "Server" and self._last_song and "<Playback_Info>Stop<" in await self._do_api_get(
+                "<SERVER><Play_Info>GetParam</Play_Info></SERVER>"):
+            # After Stop the receiver ignores Play: select the track again.
+            # Asked from the receiver, as the state polled right after Stop
+            # may still be playing
             await self._play_last_track(LIST_SOURCES["Server"])
             return
         await self._media_play_control("Play")

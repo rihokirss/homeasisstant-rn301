@@ -414,6 +414,19 @@ async def test_server_play_after_stop_selects_track_again(hass, hass_ws_client, 
     assert hass.states.get(ENTITY_ID).state == "playing"
 
 
+async def test_server_play_right_after_stop(hass, hass_ws_client, receiver, config_entry):
+    """The receiver may still report playing when polled right after Stop."""
+    await setup_entry(hass, config_entry)
+    folder = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
+    await _call(hass, "play_media", media_content_id=folder["Track 1.2"], media_content_type="music")
+    receiver.playback, receiver.song = "Stop", ""
+    assert hass.states.get(ENTITY_ID).state == "playing"
+
+    await _call(hass, "media_play")
+
+    assert (receiver.playback, receiver.song) == ("Play", "Track 1.2")
+
+
 async def test_server_play_after_stop_of_track_started_on_receiver(hass, receiver, config_entry):
     tree = receiver.server_tree
     ketas = tree[1][0]
