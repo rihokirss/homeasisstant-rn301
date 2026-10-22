@@ -27,6 +27,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.storage import Store
 
+from .api import async_get_system_info
 from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT
 
 BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
@@ -148,13 +149,14 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the media player platform from YAML."""
-    async_add_entities([YamahaRn301MP(config.get(CONF_NAME), config.get(CONF_HOST))], True)
+    async_add_entities([YamahaRn301MP(config.get(CONF_NAME), config.get(CONF_HOST), serial=None, version=None)], True)
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the media player platform from a config entry."""
     host = entry.data[CONF_HOST]
     name = entry.data.get(CONF_NAME, DEFAULT_NAME)
-    player = YamahaRn301MP(name, host, entry.entry_id)
+    serial, version = await async_get_system_info(hass, host)
+    player = YamahaRn301MP(name, host, entry.entry_id, serial, version)
     async_add_entities([player], True)
 
 class YamahaRn301MP(MediaPlayerEntity):
@@ -165,7 +167,7 @@ class YamahaRn301MP(MediaPlayerEntity):
     # Two steps on the receiver's 0-100 volume scale
     _attr_volume_step = 0.02
 
-    def __init__(self, name, host, unique_id=None):
+    def __init__(self, name, host, unique_id=None, serial=None, version=None):
         self._host = host
         # Config entries pass the entry ID so the entity survives a host change;
         # YAML setups have no entry and keep the host-based ID.
@@ -175,6 +177,8 @@ class YamahaRn301MP(MediaPlayerEntity):
             manufacturer="Yamaha",
             model="R-N301",
             name=name,
+            serial_number=serial,
+            sw_version=version,
             configuration_url=f"http://{host}/",
         )
         self._base_url = BASE_URL.format(self._host)
