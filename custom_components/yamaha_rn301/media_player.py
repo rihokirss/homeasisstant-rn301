@@ -82,7 +82,7 @@ SUPPORT_SERVER = _BASE_FEATURES | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPla
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
-    vol.Required(CONF_HOST): cv.string
+    vol.Required(CONF_HOST): cv.string,
     vol.Optional(CONF_PLAY_INFO_INTERVAL, default=DEFAULT_PLAY_INFO_INTERVAL):
         vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
 })
