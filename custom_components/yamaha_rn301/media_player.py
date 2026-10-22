@@ -12,14 +12,10 @@ import voluptuous as vol
 import aiohttp
 
 from homeassistant.components.media_player import (
-    MediaPlayerDeviceClass, MediaPlayerEntity, MediaPlayerState, MediaPlayerEntityFeature, PLATFORM_SCHEMA, RepeatMode)
-
-from homeassistant.components.media_player.const import MediaType, MediaClass
+    PLATFORM_SCHEMA, BrowseMedia, MediaPlayerDeviceClass, MediaPlayerEntity, MediaPlayerEntityFeature,
+    MediaPlayerState, RepeatMode)
+from homeassistant.components.media_player.const import MediaClass, MediaType
 from homeassistant.components.media_player.errors import BrowseError
-try:
-    from homeassistant.components.media_player.browse_media import BrowseMedia
-except ImportError:
-    from homeassistant.components.media_player import BrowseMedia
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.exceptions import HomeAssistantError
 
@@ -398,9 +394,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         await self._set_power_state(False)
 
     async def async_set_volume_level(self, volume):
-        """Set the volume, clamped to the receiver's 0-100 range."""
-        # The receiver's scale is 0-100 and rejects values outside it
-        # (RC=5, "parameter out of range"), so clamp instead of sending them.
+        # The receiver rejects values outside 0-100 (RC=5, "parameter out of range")
         value = max(0, min(100, round(volume * 100)))
         await self._do_api_put(
             '<Main_Zone><Volume><Lvl><Val>{0}</Val><Exp>0</Exp><Unit></Unit></Lvl></Volume></Main_Zone>'.format(
