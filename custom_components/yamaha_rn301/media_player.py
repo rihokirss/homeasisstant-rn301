@@ -30,7 +30,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT
+from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT, CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL
 
 BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 # Consecutive failed polls before the entity is reported unavailable; the
@@ -73,6 +73,8 @@ SUPPORT_SERVER = _BASE_FEATURES | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPla
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     vol.Required(CONF_HOST): cv.string
+    vol.Optional(CONF_PLAY_INFO_INTERVAL, default=DEFAULT_PLAY_INFO_INTERVAL):
+        vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
 })
 SOURCE_MAPPING = {
     'AirPlay': 'AirPlay',
@@ -126,13 +128,23 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
     """Set up the media player platform from YAML."""
-    async_add_entities([YamahaRn301MP(config.get(CONF_NAME), config.get(CONF_HOST))], True)
+    async_add_entities(
+        [YamahaRn301MP(
+            config.get(CONF_NAME),
+            config.get(CONF_HOST),
+            play_info_interval=config.get(CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL),
+        )],
+        True,
+    )
 
 async def async_setup_entry(hass, entry, async_add_entities):
     """Set up the media player platform from a config entry."""
     host = entry.data[CONF_HOST]
     name = entry.data.get(CONF_NAME, DEFAULT_NAME)
-    player = YamahaRn301MP(name, host, entry.entry_id)
+    player = YamahaRn301MP(
+        name, host, entry.entry_id,
+        entry.options.get(CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL),
+    )
     async_add_entities([player], True)
 
 class YamahaRn301MP(MediaPlayerEntity):
@@ -143,7 +155,7 @@ class YamahaRn301MP(MediaPlayerEntity):
     # Two steps on the receiver's 0-100 volume scale
     _attr_volume_step = 0.02
 
-    def __init__(self, name, host, unique_id=None):
+    def __init__(self, name, host, unique_id=None, play_info_interval=DEFAULT_PLAY_INFO_INTERVAL):
         self._host = host
         # Config entries pass the entry ID so the entity survives a host change;
         # YAML setups have no entry and keep the host-based ID.
@@ -173,6 +185,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._session = None
         self._current_preset = None
         self._failed_updates = 0
+        self._play_info_interval = play_info_interval
         self._last_play_info_update = 0
         # (menu path, menu name) of the list the receiver shows, per list source tag
         self._list_paths = {}
