@@ -566,10 +566,9 @@ class YamahaRn301MP(MediaPlayerEntity):
                                 self._current_preset = preset_node.text
                     except Exception as e:
                         _LOGGER.warning("Error parsing media node: %s", e)
-
             else:
                 self._nullify_media_fields()
-        self._last_play_info_update = time.monotonic()
+            self._last_play_info_update = time.monotonic()
         except ET.ParseError as e:
             _LOGGER.error("Failed to parse XML response in media update: %s", e)
         except Exception as e:
