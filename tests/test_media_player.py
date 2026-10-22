@@ -241,6 +241,17 @@ async def test_tuner_presets_step_through_stored_presets(hass, receiver, config_
     assert receiver.preset == "5"
 
 
+async def test_tuner_preset_right_after_selecting_tuner(hass, receiver, config_entry, monkeypatch):
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.TUNER_START_DELAY", 0.3)
+    receiver.tuner_start_time = 0.2
+    await setup_entry(hass, config_entry)
+
+    await _call(hass, "select_source", source="Tuner")
+    await _call(hass, "media_next_track")
+
+    assert receiver.preset == "3"
+
+
 async def test_tuner_without_presets(hass, receiver, config_entry):
     receiver.input = "TUNER"
     receiver.presets = []

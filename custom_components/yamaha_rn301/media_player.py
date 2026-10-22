@@ -37,6 +37,9 @@ MAX_FAILED_UPDATES = 3
 # second after turning on: commands refused within this many seconds of
 # turning it on are sent again
 POWER_ON_DELAY = 3
+# The Tuner ignores preset selections (with RC="0") for about 0.7 seconds
+# after the input is selected
+TUNER_START_DELAY = 1
 # Why the receiver refuses a command, by its RC code
 RC_ERRORS = {
     '3': "The receiver does not accept this value",
@@ -177,8 +180,10 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._session = None
         self._current_preset = None
         self._failed_updates = 0
-        # time.monotonic() when the receiver was last turned on
+        # time.monotonic() when the receiver was last turned on, and when an
+        # input was last selected
         self._turned_on_at = None
+        self._selected_at = None
         # The Server track playing last, and the folders tracks were played
         # from in Home Assistant per list source tag, to select it again after Stop
         self._last_song = None
@@ -398,6 +403,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         # poll that may have read the old input is running
         self._source = self._reverse_mapping.get(input_sel, input_sel)
         self._device_source = input_sel.replace(" ", "_")
+        self._selected_at = time.monotonic()
 
     async def async_mute_volume(self, mute):
         await self._do_api_put('<Main_Zone><Volume><Mute>{0}</Mute></Volume></Main_Zone>'.format('On' if mute else 'Off'))
@@ -442,7 +448,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         """Play media - for TUNER presets, NET RADIO stations, and SERVER tracks"""
         src = LIST_SOURCES.get(self._source)
         if self._source == "Tuner" and media_type == "preset":
-            await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{media_id}</Preset_Sel></Preset></Play_Control></Tuner>')
+            await self._select_preset(media_id)
         elif src is not None and media_id.startswith(f"{src.prefix}_track:"):
             # Navigate to the station or track and play it
             await self._navigate_and_play(src, media_id)
@@ -630,6 +636,12 @@ class YamahaRn301MP(MediaPlayerEntity):
             preset = presets[(presets.index(current) + step) % len(presets)]
         else:
             preset = presets[0 if step > 0 else -1]
+        await self._select_preset(preset)
+
+    async def _select_preset(self, preset):
+        if self._selected_at is not None:
+            # The Tuner may have been selected a moment ago
+            await asyncio.sleep(self._selected_at + TUNER_START_DELAY - time.monotonic())
         await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{preset}</Preset_Sel></Preset></Play_Control></Tuner>')
         self._current_preset = preset
 

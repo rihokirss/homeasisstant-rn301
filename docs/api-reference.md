@@ -53,7 +53,7 @@ The R-N301 has no `desc.xml` file that lists its commands (the request returns 4
 - `Input_Sel` in standby (the receiver stays in standby)
 - Playback commands for an input that is not selected
 - `Direct_Sel`, `Jump_Line` and `Cursor` while a list is loading, which it ignores
-- `Preset_Sel` with a preset number that has no station stored
+- `Preset_Sel` with a preset number that has no station stored, or sent within about 0.7 seconds of selecting the Tuner input
 - `Play` after `Stop` for SERVER or NET RADIO, which does not start the track or station again
 
 `GET` requests are answered in standby too.
@@ -373,6 +373,7 @@ The input is `TUNER`, but its element is `<Tuner>`.
 `Preset_Sel_Item` lists `No Preset` and then each stored preset, for example `<Param>2</Param>` with the title `2 : FM 97.80 MHz`.
 - `Preset_Sel` `0` is refused with `RC="3"`.
 - A number with no stored preset is answered with `RC="0"`, but the preset does not change.
+- For about 0.7 seconds after the Tuner input is selected, `Preset_Sel` is answered with `RC="0"` but ignored. NET RADIO list commands work right after switching.
 - When a frequency is tuned by hand, `Play_Info` shows `<Search_Mode>Tuning</Search_Mode>` and `Preset_Sel` keeps the last preset.
 
 The frequency is `Val` × 10^-`Exp` in `Unit`: `<Val>9780</Val><Exp>2</Exp><Unit>MHz</Unit>` is 97.80 MHz. The Tuner has no `Playback` commands (HTTP 400).
@@ -408,7 +409,7 @@ The station name appears in `Play_Info` after 2–3 seconds.
 - **Unreachable receiver:** Requests time out after 5 seconds. After 3 failed polls in a row, the entity becomes unavailable.
 - **Failed commands:** When the receiver does not take a command (it cannot be reached, HTTP 400, or an `RC` other than `0`), the action in Home Assistant fails with a message such as "The receiver is in standby".
 - **Play after Stop:** For SERVER, Play after Stop selects the track that played last again. The integration looks for it by name in the folder it was played from in Home Assistant, or else in the list the receiver shows, where the menu stays after a track is selected on the receiver.
-- **Tuner presets:** Next and previous step through the stored presets from `Preset_Sel_Item`, starting from the preset in the Tuner's `Play_Info`.
+- **Tuner presets:** Next and previous step through the stored presets from `Preset_Sel_Item`, starting from the preset in the Tuner's `Play_Info`. Within 1 second of selecting the Tuner, the integration waits before selecting a preset.
 - **After turning on:** For 3 seconds after the integration turns the receiver on, commands refused with `RC="4"` are sent again every 0.2 seconds. So an automation can turn the receiver on and set the volume right after.
 - **Lists:** While a list loads, `List_Info` is read every 0.15 seconds, for at most 10 seconds. A `Jump_Line` the receiver has not acted on is sent again after 2 seconds.
 - **Saved lists:** Lists read for the media browser are kept, also across restarts. A list older than 10 minutes is read again in the background when it is opened.

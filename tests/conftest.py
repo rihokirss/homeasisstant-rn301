@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import re
+import time
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
 
@@ -62,6 +63,9 @@ class FakeReceiver:
         # Stored Tuner presets and the one selected
         self.presets = [str(i) for i in range(1, 9)]
         self.preset = "2"
+        # Seconds the Tuner ignores presets after it is selected
+        self.tuner_start_time = 0
+        self._tuner_selected_at = 0
         self.puts = []
         # Menu position per list input: stack of (node, current_line)
         # Own copies, so a test can change a list
@@ -122,6 +126,8 @@ class FakeReceiver:
             # Taken also in standby
             if sel not in self.inputs:
                 return "3"
+            if sel == "TUNER":
+                self._tuner_selected_at = time.monotonic()
             self.input = sel
             return "0"
         if self.power != "On":
@@ -152,7 +158,7 @@ class FakeReceiver:
         if (preset := section.findtext("Play_Control/Preset/Preset_Sel")) is not None:
             if preset == "0":
                 return "3"
-            if preset in self.presets:
+            if preset in self.presets and time.monotonic() >= self._tuner_selected_at + self.tuner_start_time:
                 self.preset = preset
         if section.tag in self.lists and section.find("List_Control") is not None:
             return self._list_control(self.lists[section.tag], section.find("List_Control"))
