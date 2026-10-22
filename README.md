@@ -116,7 +116,7 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **FIXED**: Commands sent right after turning the receiver on, for example setting the volume in the same automation, were refused while it started up. They are now sent again for up to 3 seconds
 - **FIXED**: Shuffle is no longer offered for Spotify and AirPlay; the receiver has no shuffle for these inputs
 - **FIXED**: Play after Stop on the Server input did nothing, because the receiver ignores it. The integration now selects the last track again
-- **FIXED**: After Pause or Stop, the player could show "playing" for up to 10 seconds, because the receiver reports the change a moment later
+- **FIXED**: After Play, Pause or Stop, the player could show the old state for up to 10 seconds, because the receiver reports the change a moment later
 - **FIXED**: Next and previous on the Tuner step through the presets stored on the receiver. They counted 1 to 8 before and got stuck when fewer presets were stored
 - **FIXED**: After selecting an input, the old input could be shown for up to 10 seconds, so a command right after it, such as next on the Tuner, went to the old input. Presets selected right after switching to the Tuner, which it ignores for a moment, now wait until it takes them
 - **DOCS**: The API reference was checked against a real R-N301 and corrected: response codes, power, inputs, playback per input, list timing and the Tuner

@@ -222,12 +222,14 @@ async def test_mute(hass, receiver, config_entry):
 
 async def test_pause_state(hass, receiver, config_entry):
     await setup_entry(hass, config_entry)
-    # The receiver still reports playing right after Pause
+    # The receiver still reports the old state right after Pause and Play
     receiver.playback_lag_polls = 1
 
     await _call(hass, "media_pause")
-
     assert hass.states.get(ENTITY_ID).state == "paused"
+
+    await _call(hass, "media_play")
+    assert hass.states.get(ENTITY_ID).state == "playing"
 
 
 async def test_tuner_presets_step_through_stored_presets(hass, receiver, config_entry):

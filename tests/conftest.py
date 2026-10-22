@@ -63,8 +63,8 @@ class FakeReceiver:
         # Stored Tuner presets and the one selected
         self.presets = [str(i) for i in range(1, 9)]
         self.preset = "2"
-        # Number of Play_Info polls after Pause or Stop that still report the
-        # old state
+        # Number of Play_Info polls after Play, Pause or Stop that still
+        # report the old state
         self.playback_lag_polls = 0
         self._playback_lag = None
         # Seconds the Tuner ignores presets after it is selected
@@ -155,7 +155,7 @@ class FakeReceiver:
         if (playback := section.findtext("Play_Control/Playback")) is not None:
             # Like the real receiver, Play does not start again after Stop,
             # which clears the song
-            if playback in ("Pause", "Stop") and self.playback_lag_polls:
+            if playback in ("Play", "Pause", "Stop") and self.playback_lag_polls:
                 self._playback_lag = [self.playback, self.song, self.playback_lag_polls]
             if playback == "Stop":
                 self.song = ""

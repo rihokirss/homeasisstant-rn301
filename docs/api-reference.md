@@ -270,7 +270,7 @@ NET RADIO example:
 
 - "Taken": answered with `RC="0"`. The effect could not be checked because nothing was playing over Spotify or AirPlay during the test.
 - After `Stop`, `Play` does not start a SERVER track or NET RADIO station again, although it is answered with `RC="0"`: select it in the list again.
-- For about 0.1 seconds after taking `Stop`, and sometimes `Pause`, `Play_Info` still reports `Play` and the old song.
+- For about 0.1 seconds after taking `Stop`, and sometimes `Pause` or `Play`, `Play_Info` still reports the old state and song.
 - A NET RADIO station or SERVER track starts playing when it is selected with `Direct_Sel` (see below), so `Play` is not needed after it.
 - The Tuner is controlled with [presets](#tuner).
 
@@ -409,7 +409,7 @@ The station name appears in `Play_Info` after 2–3 seconds.
 - **Polling:** Every 10 seconds (Home Assistant's default for media players), the integration reads the basic status, and the input's `Play_Info` when the receiver is on.
 - **Unreachable receiver:** Requests time out after 5 seconds. After 3 failed polls in a row, the entity becomes unavailable.
 - **Failed commands:** When the receiver does not take a command (it cannot be reached, HTTP 400, or an `RC` other than `0`), the action in Home Assistant fails with a message such as "The receiver is in standby".
-- **Pause and Stop:** After Pause or Stop, the integration waits up to 1 second until `Play_Info` reports it, so the state shown right after is current.
+- **Play, Pause and Stop:** After these commands, the integration waits up to 1 second until `Play_Info` reports the new state, so the state shown right after is current.
 - **Play after Stop:** For SERVER, Play after Stop selects the track that played last again. The integration looks for it by name in the folder it was played from in Home Assistant, or else in the list the receiver shows, where the menu stays after a track is selected on the receiver.
 - **Tuner presets:** Next and previous step through the stored presets from `Preset_Sel_Item`, starting from the preset in the Tuner's `Play_Info`. Within 1 second of selecting the Tuner, the integration waits before selecting a preset.
 - **After turning on:** For 3 seconds after the integration turns the receiver on, commands refused with `RC="4"` are sent again every 0.2 seconds. So an automation can turn the receiver on and set the volume right after.
