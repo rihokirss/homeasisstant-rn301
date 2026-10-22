@@ -237,6 +237,10 @@ Contributions are welcome! Please:
 3. Make your changes and run the tests (`pip install -r requirements_test.txt && pytest`)
 4. Submit a pull request
 
+## Credits
+
+This integration started in 2024 from the R-N301 component by Daniel Bowman ([vrih/homeassistant-rn301](https://github.com/vrih/homeassistant-rn301)), in the version extended by noam148 and Janusz Jablonski ([yanoosh/homeassistant-rn301](https://github.com/yanoosh/homeassistant-rn301)).
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
