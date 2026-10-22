@@ -9,10 +9,10 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 - **Power Control**: Turn your receiver on or off
 - **Volume Control**: Adjust the volume, step it up or down, and mute
 - **Source Selection**: Choose between inputs like Optical, CD, Line, and more
-- **Media Playback**: Control media playback including play, pause, stop, track navigation, shuffle and repeat
+- **Media Playback**: Control media playback including play, pause, stop and track navigation, and shuffle and repeat for the Server input
 - **Enhanced Media Information**: Display track info, station names, and frequencies
-- **TUNER Preset Support**: Switch between radio presets using next/previous buttons (works even without signal lock)
-- **Media Server Browsing**: Browse DLNA media servers (SERVER input) page by page and play tracks directly in Home Assistant
+- **TUNER Preset Support**: Switch between the presets stored on the receiver using next/previous buttons (works even without signal lock)
+- **Media Server Browsing**: Browse DLNA media servers (SERVER input) and play tracks directly in Home Assistant
 - **NET RADIO Browse Media**: Browse and select internet radio stations directly in Home Assistant
 - **Automatic Discovery**: Home Assistant finds the receiver on your network (SSDP) and offers to add it
 - **Follows IP Changes**: When the receiver gets a new IP address from DHCP, Home Assistant updates it automatically
@@ -63,7 +63,8 @@ Once installed and configured, the Yamaha R-N301 will appear as a media player e
 - Use the Lovelace UI to control power, volume, source selection, and media playback
 - Create automations and scripts using the media player services
 - Access different input sources with varying capabilities:
-  - **Full Control**: Spotify, Server, AirPlay (play/pause/stop/skip/shuffle; repeat on Server)
+  - **Server**: Browse and play tracks; play/pause/stop/skip, shuffle and repeat
+  - **Spotify, AirPlay**: Play/pause/stop/skip
   - **Net Radio**: Browse and play stations (see [NET RADIO After the vTuner Shutdown](#net-radio-after-the-vtuner-shutdown))
   - **TUNER Control**: Power, volume, source, preset switching via next/previous track buttons
   - **Basic Control**: Optical, Coaxial, CD, Line inputs (power/volume/source only)
@@ -109,6 +110,17 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **Network**: Receiver must be accessible via HTTP on your local network
 
 ## Recent Updates
+
+### Version 1.6.0 - Command Feedback
+- **CHANGED**: A command the receiver does not carry out now fails with a message instead of silently doing nothing, for example "The receiver is in standby" or "Cannot reach the receiver". An automation that sends a command to the receiver in standby now stops with that error
+- **FIXED**: Commands sent right after turning the receiver on, for example setting the volume in the same automation, were refused while it started up. They are now sent again for up to 3 seconds
+- **FIXED**: Shuffle is no longer offered for Spotify and AirPlay; the receiver has no shuffle for these inputs
+- **FIXED**: Play after Stop on the Server input did nothing, because the receiver ignores it. The integration now selects the last track again
+- **FIXED**: After Play, Pause or Stop, the player could show the old state for up to 10 seconds, because the receiver reports the change a moment later
+- **FIXED**: Accented letters in NET RADIO song titles were garbled ("PÃ¤ev" instead of "Päev"); the receiver reads the station's UTF-8 text as Latin-1
+- **FIXED**: Next and previous on the Tuner step through the presets stored on the receiver. They counted 1 to 8 before and got stuck when fewer presets were stored
+- **FIXED**: After selecting an input, the old input could be shown for up to 10 seconds, so a command right after it, such as next on the Tuner, went to the old input. Presets selected right after switching to the Tuner, which it ignores for a moment, now wait until it takes them
+- **DOCS**: The API reference was checked against a real R-N301 and corrected: response codes, power, inputs, playback per input, list timing and the Tuner
 
 ### Version 1.5.2 - Continuous Browsing
 - **IMPROVED**: NET RADIO and Server folders open as one continuous list instead of pages of 8. The receiver delivers 8 entries per 0.5–1 s, so a list opened for the first time shows its first entries within about 2 seconds, reads the rest in the background, and offers "Show all". Lists are kept (also across restarts) and open at once from then on; lists older than 10 minutes are refreshed in the background when opened
@@ -206,6 +218,11 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - Ensure your receiver is on the same network as Home Assistant
 - Check that the IP address is correct and accessible
 - Verify the receiver's network settings are properly configured
+
+**A Command Fails With a Message:**
+- "The receiver is in standby": turn the receiver on first. Volume, mute, playback and browsing need it on.
+- "Cannot reach the receiver": check that the receiver is connected and its IP address is correct.
+- "The receiver does not accept this value": the receiver refused the value, for example an input it does not have.
 
 **Setup Problems:**
 - Try restarting Home Assistant after installation

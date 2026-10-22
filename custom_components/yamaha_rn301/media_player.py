@@ -1,5 +1,6 @@
 import html
 import logging
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -32,6 +33,21 @@ BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 # Consecutive failed polls before the entity is reported unavailable; the
 # receiver occasionally misses a poll in standby
 MAX_FAILED_UPDATES = 3
+# The receiver refuses commands with RC="4" in standby and for about half a
+# second after turning on: commands refused within this many seconds of
+# turning it on are sent again
+POWER_ON_DELAY = 3
+# The Tuner ignores preset selections (with RC="0") for about 0.7 seconds
+# after the input is selected
+TUNER_START_DELAY = 1
+# The receiver may still report the old state for about 0.1 seconds after
+# taking Play, Pause or Stop: seconds to wait for it to report the new state
+PLAYBACK_WAIT = 1
+# Why the receiver refuses a command, by its RC code
+RC_ERRORS = {
+    '3': "The receiver does not accept this value",
+    '4': "The receiver is in standby",
+}
 # Polling while a NET RADIO or SERVER list is busy loading; a page takes
 # about half a second, a media server waking up several seconds
 LIST_BUSY_POLL_INTERVAL = 0.15
@@ -51,7 +67,7 @@ _BASE_FEATURES = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.
                  MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | MediaPlayerEntityFeature.SELECT_SOURCE
 
 SUPPORT_YAMAHA = _BASE_FEATURES | MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE | MediaPlayerEntityFeature.STOP | \
-                 MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK | MediaPlayerEntityFeature.SHUFFLE_SET
+                 MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK
 
 SUPPORTED_PLAYBACK = _BASE_FEATURES
 
@@ -104,6 +120,18 @@ def _path_part(item):
     """Media ID part for a list item: its line number and, to find it again
     after the list changed, its name."""
     return f"{item['line_id']}~{quote(item['title'], safe='')}"
+
+
+def _fix_encoding(text):
+    """Undo UTF-8 text read as Latin-1, e.g. "PÃ¤ev" for "Päev".
+
+    The receiver does this to the song titles NET RADIO stations send. Text
+    that is not such a mix-up, such as a correct "ä", is returned as is.
+    """
+    try:
+        return text.encode('latin-1').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
 
 
 def _split_part(part):
@@ -181,6 +209,14 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._failed_updates = 0
         self._play_info_interval = play_info_interval
         self._last_play_info_update = 0
+        # time.monotonic() when the receiver was last turned on, and when an
+        # input was last selected
+        self._turned_on_at = None
+        self._selected_at = None
+        # The Server track playing last, and the folders tracks were played
+        # from in Home Assistant per list source tag, to select it again after Stop
+        self._last_song = None
+        self._played_from = {}
         # (menu path, menu name) of the list the receiver shows, per list source tag
         self._list_paths = {}
         # Lists read for browsing: "tag|path" -> {'time': ..., 'listing': ...}
@@ -386,15 +422,20 @@ class YamahaRn301MP(MediaPlayerEntity):
         await self._set_power_state(False)
 
     async def async_set_volume_level(self, volume):
-        # The receiver rejects values outside 0-100 (RC=5, "parameter out of range")
+        # The receiver refuses values outside 0-100
         value = max(0, min(100, round(volume * 100)))
         await self._do_api_put(
             '<Main_Zone><Volume><Lvl><Val>{0}</Val><Exp>0</Exp><Unit></Unit></Lvl></Volume></Main_Zone>'.format(
                 value))
 
     async def async_select_source(self, source):
-        await self._do_api_put(
-            '<Main_Zone><Input><Input_Sel>{0}</Input_Sel></Input></Main_Zone>'.format(SOURCE_MAPPING.get(source, source)))
+        input_sel = SOURCE_MAPPING.get(source, source)
+        await self._do_api_put('<Main_Zone><Input><Input_Sel>{0}</Input_Sel></Input></Main_Zone>'.format(input_sel))
+        # Set at once: Home Assistant skips the refresh after this call while a
+        # poll that may have read the old input is running
+        self._source = self._reverse_mapping.get(input_sel, input_sel)
+        self._device_source = input_sel.replace(" ", "_")
+        self._selected_at = time.monotonic()
 
     async def async_mute_volume(self, mute):
         await self._do_api_put('<Main_Zone><Volume><Mute>{0}</Mute></Volume></Main_Zone>'.format('On' if mute else 'Off'))
@@ -403,9 +444,25 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def _media_play_control(self, command):
         await self._do_api_put(
             '<{0}><Play_Control><Playback>{1}</Playback></Play_Control></{0}>'.format(self._device_source, command))
+        if command in ("Play", "Pause", "Stop"):
+            # So the state refreshed after this call, and Play right after
+            # Stop, see the new state
+            deadline = time.monotonic() + PLAYBACK_WAIT
+            while f"<Playback_Info>{command}<" not in await self._do_api_get(
+                    f"<{self._device_source}><Play_Info>GetParam</Play_Info></{self._device_source}>"):
+                if time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(0.1)
 
     async def async_media_play(self):
         """Play media"""
+        if self._source == "Server" and self._last_song and "<Playback_Info>Stop<" in await self._do_api_get(
+                "<SERVER><Play_Info>GetParam</Play_Info></SERVER>"):
+            # After Stop the receiver ignores Play: select the track again.
+            # Asked from the receiver, as the state polled right after Stop
+            # may still be playing
+            await self._play_last_track(LIST_SOURCES["Server"])
+            return
         await self._media_play_control("Play")
 
     async def async_media_pause(self):
@@ -418,13 +475,13 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def async_media_next_track(self):
         if self._source == "Tuner":
-            await self._next_preset()
+            await self._step_preset(1)
         else:
             await self._media_play_control("Skip Fwd")
 
     async def async_media_previous_track(self):
         if self._source == "Tuner":
-            await self._previous_preset()
+            await self._step_preset(-1)
         else:
             await self._media_play_control("Skip Rev")
 
@@ -432,7 +489,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         """Play media - for TUNER presets, NET RADIO stations, and SERVER tracks"""
         src = LIST_SOURCES.get(self._source)
         if self._source == "Tuner" and media_type == "preset":
-            await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{media_id}</Preset_Sel></Preset></Play_Control></Tuner>')
+            await self._select_preset(media_id)
         elif src is not None and media_id.startswith(f"{src.prefix}_track:"):
             # Navigate to the station or track and play it
             await self._navigate_and_play(src, media_id)
@@ -445,20 +502,24 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def _set_power_state(self, on):
         await self._do_api_put(
             '<System><Power_Control><Power>{0}</Power></Power_Control></System>'.format("On" if on else "Standby"))
+        if on:
+            self._turned_on_at = time.monotonic()
+
+    async def _post(self, data):
+        """Send a request and return the HTTP status and the response text."""
+        if self._session is None:
+            self._session = async_get_clientsession(self.hass)
+        timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT)
+        data = '<?xml version="1.0" encoding="utf-8"?>' + data
+        async with self._session.post(self._base_url, data=data, timeout=timeout) as req:
+            return req.status, await req.text()
 
     async def _do_api_request(self, data) -> str:
-        data = '<?xml version="1.0" encoding="utf-8"?>' + data
         try:
-            if self._session is None:
-                self._session = async_get_clientsession(self.hass)
-            
-            timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT)
-            async with self._session.post(self._base_url, data=data, timeout=timeout) as req:
-                if req.status != 200:
-                    _LOGGER.warning("Error doing API request, %d, %s", req.status, data)
-                else:
-                    _LOGGER.debug("API request ok %d", req.status)
-                return await req.text()
+            status, text = await self._post(data)
+            if status != 200:
+                _LOGGER.warning("Error doing API request, %d, %s", status, data)
+            return text
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             # Logged at debug level: async_update reports the receiver going
             # offline once instead of on every poll.
@@ -474,8 +535,28 @@ class YamahaRn301MP(MediaPlayerEntity):
         return response
 
     async def _do_api_put(self, data) -> str:
+        """Send a command, raising HomeAssistantError when the receiver does not carry it out."""
         data = '<YAMAHA_AV cmd="PUT">' + data + '</YAMAHA_AV>'
-        return await self._do_api_request(data)
+        while True:
+            try:
+                status, text = await self._post(data)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise HomeAssistantError(f"Cannot reach the receiver at {self._host}") from e
+            # The receiver answers HTTP 200 with RC="0" when it takes a command,
+            # also one it then ignores, such as a selection while a list loads
+            rc = re.search(r'\bRC="(\d+)"', text)
+            code = rc.group(1) if rc else None
+            if status == 200 and code == '0':
+                return text
+            if (code == '4' and self._turned_on_at is not None
+                    and time.monotonic() < self._turned_on_at + POWER_ON_DELAY):
+                await asyncio.sleep(0.2)
+                continue
+            _LOGGER.debug("Receiver refused %s: HTTP %d, RC %s", data, status, code)
+            if status != 200:
+                # HTTP 400: the input has no such command, e.g. shuffle for Spotify
+                raise HomeAssistantError("The receiver does not support this command")
+            raise HomeAssistantError(RC_ERRORS.get(code, f"The receiver refused the command (RC {code})"))
 
     def _nullify_media_fields(self) -> None:
         """Set media fields to null as we don't require them on certain channels"""
@@ -537,7 +618,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                         elif node.tag == "Meta_Info":
                             for meta in node:
                                 if meta.tag in media_meta_mapping and meta.text:
-                                    self._media_meta[media_meta_mapping[meta.tag]] = meta.text.replace('&amp;', '&')
+                                    self._media_meta[media_meta_mapping[meta.tag]] = _fix_encoding(meta.text.replace('&amp;', '&'))
                         elif node.tag == "Playback_Info":
                             self._set_playback_info(node.text)
                         elif node.tag == "Signal_Info":
@@ -566,6 +647,9 @@ class YamahaRn301MP(MediaPlayerEntity):
                                 self._current_preset = preset_node.text
                     except Exception as e:
                         _LOGGER.warning("Error parsing media node: %s", e)
+                if self._device_source == "SERVER" and self._media_playing and self._media_meta.get('song'):
+                    self._last_song = self._media_meta['song']
+
             else:
                 self._nullify_media_fields()
             self._last_play_info_update = time.monotonic()
@@ -574,37 +658,34 @@ class YamahaRn301MP(MediaPlayerEntity):
         except Exception as e:
             _LOGGER.exception("Error updating media info: %s", e)
 
-    async def _next_preset(self):
-        """Switch to next preset (1-8, cycle back to 1)"""
+    async def _step_preset(self, step):
+        """Select the next (step 1) or previous (step -1) stored Tuner preset."""
+        # The preset is read from the receiver too: the polled one may be
+        # old, e.g. right after switching to the Tuner
         try:
-            if self._current_preset:
-                current = int(self._current_preset)
-            else:
-                current = 1
-            
-            next_preset = (current % 8) + 1  # Cycle 1-8
-            
-            await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{next_preset}</Preset_Sel></Preset></Play_Control></Tuner>')
-            self._current_preset = str(next_preset)
-            await self.async_update()
-        except (ValueError, TypeError) as e:
-            _LOGGER.warning("Error switching to next preset: %s", e)
+            items = ET.fromstring(await self._do_api_get(
+                '<Tuner><Play_Control><Preset><Preset_Sel_Item>GetParam</Preset_Sel_Item></Preset></Play_Control></Tuner>'
+            )).find('Tuner/Play_Control/Preset/Preset_Sel_Item')
+            current = ET.fromstring(await self._do_api_get(
+                '<Tuner><Play_Info>GetParam</Play_Info></Tuner>')).findtext('Tuner/Play_Info/Preset/Preset_Sel')
+        except ET.ParseError as e:
+            raise HomeAssistantError(f"Cannot read the presets from the receiver at {self._host}") from e
+        # The first item, "No Preset", is read-only; the others are the stored presets
+        presets = [item.findtext('Param') for item in items if item.findtext('RW') == 'RW'] if items is not None else []
+        if not presets:
+            raise HomeAssistantError("The receiver has no Tuner presets stored")
+        if current in presets:
+            preset = presets[(presets.index(current) + step) % len(presets)]
+        else:
+            preset = presets[0 if step > 0 else -1]
+        await self._select_preset(preset)
 
-    async def _previous_preset(self):
-        """Switch to previous preset (1-8, cycle back to 8)"""
-        try:
-            if self._current_preset:
-                current = int(self._current_preset)
-            else:
-                current = 1
-            
-            prev_preset = ((current - 2) % 8) + 1  # Cycle 1-8
-            
-            await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{prev_preset}</Preset_Sel></Preset></Play_Control></Tuner>')
-            self._current_preset = str(prev_preset)
-            await self.async_update()
-        except (ValueError, TypeError) as e:
-            _LOGGER.warning("Error switching to previous preset: %s", e)
+    async def _select_preset(self, preset):
+        if self._selected_at is not None:
+            # The Tuner may have been selected a moment ago
+            await asyncio.sleep(self._selected_at + TUNER_START_DELAY - time.monotonic())
+        await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{preset}</Preset_Sel></Preset></Play_Control></Tuner>')
+        self._current_preset = preset
 
     async def async_browse_media(self, media_content_type=None, media_content_id=None):
         """Browse the NET RADIO and SERVER menus"""
@@ -619,8 +700,11 @@ class YamahaRn301MP(MediaPlayerEntity):
             if media_content_id.startswith(f"{src.prefix}_menu:root:"):
                 return await self._browse_list(src, media_content_id)
             raise BrowseError(f"Unknown media ID {media_content_id}")
-        except HomeAssistantError:
+        except BrowseError:
             raise
+        except HomeAssistantError as e:
+            # Such as the receiver being in standby: shown in the media browser
+            raise BrowseError(str(e)) from e
         except Exception as e:
             _LOGGER.exception("Error browsing %s media: %s", src.tag, e)
             raise BrowseError(f"Browsing {self._source} failed") from e
@@ -806,6 +890,27 @@ class YamahaRn301MP(MediaPlayerEntity):
 
             # Start playing
             await self._do_api_put(f'<{src.tag}><Play_Control><Playback>Play</Playback></Play_Control></{src.tag}>')
+        self._played_from[src.tag] = parts[2:-1]
+
+    async def _play_last_track(self, src):
+        """Select the track that played last again, as the receiver ignores Play after Stop."""
+        title = self._last_song
+        folder = self._played_from.get(src.tag)
+        # Tracks play on through their folder, so the track is in the folder
+        # played from in Home Assistant, if that list was read whole
+        entry = self._list_cache.get(f"{src.tag}|{':'.join(folder)}") if folder is not None else None
+        line = next((int(item['line_id'][5:]) for item in entry['listing']['items']
+                     if item['title'] == title), None) if entry else None
+        await self._cancel_list_task()
+        async with self._list_lock:
+            if line is not None:
+                await self._show_list(src, folder)
+            else:
+                # Played from the receiver: its menu still shows the folder
+                # the track was selected in, unless it was moved since
+                line = self._parse_list_info(await self._wait_for_list(src))['current_line']
+            # Selecting a track starts playing it
+            await self._select_list_line(src, f"Line_{line}~{quote(title, safe='')}")
 
     def _parse_list_info(self, data):
         """Parse a List_Info response"""

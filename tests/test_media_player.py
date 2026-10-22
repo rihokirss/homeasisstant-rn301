@@ -1,5 +1,9 @@
 """Tests for the Yamaha R-N301 media player entity."""
+from unittest.mock import AsyncMock
+
+import pytest
 from homeassistant.components.media_player import MediaPlayerEntityFeature
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar, device_registry as dr, entity_registry as er, issue_registry as ir)
 from homeassistant.helpers.entity_component import async_update_entity
@@ -133,6 +137,47 @@ async def test_passive_input_features(hass, receiver, config_entry):
     assert features & MediaPlayerEntityFeature.VOLUME_STEP
 
 
+async def test_spotify_features(hass, receiver, config_entry):
+    receiver.input = "Spotify"
+    await setup_entry(hass, config_entry)
+
+    features = hass.states.get(ENTITY_ID).attributes["supported_features"]
+    assert features & MediaPlayerEntityFeature.PAUSE
+    # The receiver has no shuffle or repeat for Spotify and AirPlay (HTTP 400)
+    assert not features & MediaPlayerEntityFeature.SHUFFLE_SET
+    with pytest.raises(HomeAssistantError, match="does not support this command"):
+        await hass.data["media_player"].get_entity(ENTITY_ID).async_set_shuffle(True)
+
+
+async def test_command_in_standby_raises(hass, receiver, config_entry):
+    receiver.power = "Standby"
+    await setup_entry(hass, config_entry)
+
+    with pytest.raises(HomeAssistantError, match="The receiver is in standby"):
+        await _call(hass, "volume_set", volume_level=0.3)
+    assert receiver.volume == 25
+
+
+async def test_command_right_after_turn_on_is_sent_again(hass, receiver, config_entry):
+    receiver.power = "Standby"
+    receiver.start_up_refusals = 2
+    await setup_entry(hass, config_entry)
+
+    # As in an automation that turns the receiver on and sets the volume
+    await _call(hass, "turn_on")
+    await _call(hass, "volume_set", volume_level=0.3)
+
+    assert receiver.volume == 30
+
+
+async def test_command_to_unreachable_receiver_raises(hass, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    receiver.online = False
+
+    with pytest.raises(HomeAssistantError, match="Cannot reach the receiver"):
+        await _call(hass, "media_pause")
+
+
 async def test_volume_set_rounds(hass, receiver, config_entry):
     await setup_entry(hass, config_entry)
 
@@ -177,10 +222,47 @@ async def test_mute(hass, receiver, config_entry):
 
 async def test_pause_state(hass, receiver, config_entry):
     await setup_entry(hass, config_entry)
+    # The receiver still reports the old state right after Pause and Play
+    receiver.playback_lag_polls = 1
 
     await _call(hass, "media_pause")
-
     assert hass.states.get(ENTITY_ID).state == "paused"
+
+    await _call(hass, "media_play")
+    assert hass.states.get(ENTITY_ID).state == "playing"
+
+
+async def test_tuner_presets_step_through_stored_presets(hass, receiver, config_entry):
+    receiver.input = "TUNER"
+    receiver.presets = ["1", "2", "5"]
+    await setup_entry(hass, config_entry)
+
+    await _call(hass, "media_next_track")
+    assert receiver.preset == "5"
+    await _call(hass, "media_next_track")
+    assert receiver.preset == "1"
+    await _call(hass, "media_previous_track")
+    assert receiver.preset == "5"
+
+
+async def test_tuner_preset_right_after_selecting_tuner(hass, receiver, config_entry, monkeypatch):
+    monkeypatch.setattr("custom_components.yamaha_rn301.media_player.TUNER_START_DELAY", 0.3)
+    receiver.tuner_start_time = 0.2
+    await setup_entry(hass, config_entry)
+
+    await _call(hass, "select_source", source="Tuner")
+    await _call(hass, "media_next_track")
+
+    assert receiver.preset == "3"
+
+
+async def test_tuner_without_presets(hass, receiver, config_entry):
+    receiver.input = "TUNER"
+    receiver.presets = []
+    await setup_entry(hass, config_entry)
+
+    with pytest.raises(HomeAssistantError, match="no Tuner presets"):
+        await _call(hass, "media_next_track")
 
 
 async def test_select_source(hass, receiver, config_entry):
@@ -190,9 +272,31 @@ async def test_select_source(hass, receiver, config_entry):
     assert receiver.input == "COAXIAL"
     assert hass.states.get(ENTITY_ID).attributes["source"] == "Coaxial"
 
-    # A raw input name the integration does not know is passed through as is.
+    # A raw input name the integration does not know is passed through as
+    # is, for receivers with other inputs
+    receiver.inputs.add("USB")
     await _call(hass, "select_source", source="USB")
     assert receiver.input == "USB"
+
+
+async def test_select_source_shown_while_poll_runs(hass, receiver, config_entry, monkeypatch):
+    await setup_entry(hass, config_entry)
+    # A poll is running, so Home Assistant skips the refresh after the call
+    monkeypatch.setattr(hass.data["media_player"].get_entity(ENTITY_ID), "async_update", AsyncMock())
+
+    await _call(hass, "select_source", source="Tuner")
+
+    assert hass.states.get(ENTITY_ID).attributes["source"] == "Tuner"
+    await _call(hass, "media_next_track")
+    assert receiver.preset == "3"
+
+
+async def test_select_missing_source_raises(hass, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+
+    with pytest.raises(HomeAssistantError, match="does not accept this value"):
+        await _call(hass, "select_source", source="USB")
+    assert receiver.input == "SERVER"
 
 
 async def test_unique_id_migrated_from_host(hass, receiver, config_entry):
@@ -317,6 +421,57 @@ async def test_play_finds_station_after_list_changed(hass, hass_ws_client, recei
     assert receiver.station == "Vikerraadio"
 
 
+async def test_server_play_after_stop_selects_track_again(hass, hass_ws_client, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    folder = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
+    await _call(hass, "play_media", media_content_id=folder["Track 1.2"], media_content_type="music")
+    # The receiver plays on to the next track of the folder
+    receiver.song = "Track 1.3"
+    await async_update_entity(hass, ENTITY_ID)
+
+    await _call(hass, "media_pause")
+    await _call(hass, "media_play")
+    assert receiver.playback == "Play"
+
+    # The receiver still reports playing right after Stop
+    receiver.playback_lag_polls = 2
+    await _call(hass, "media_stop")
+    assert hass.states.get(ENTITY_ID).state == "idle"
+    # Browsing a list not read before moves the receiver's menu
+    await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_2")
+    await _call(hass, "media_play")
+
+    assert (receiver.playback, receiver.song) == ("Play", "Track 1.3")
+    assert hass.states.get(ENTITY_ID).state == "playing"
+
+
+async def test_server_play_right_after_stop(hass, hass_ws_client, receiver, config_entry):
+    """The receiver may still report playing when polled right after Stop."""
+    await setup_entry(hass, config_entry)
+    folder = _children(await _browse(hass, hass_ws_client, "server_menu:root:Line_1:Line_1:Line_1"))
+    await _call(hass, "play_media", media_content_id=folder["Track 1.2"], media_content_type="music")
+    receiver.playback, receiver.song = "Stop", ""
+    assert hass.states.get(ENTITY_ID).state == "playing"
+
+    await _call(hass, "media_play")
+
+    assert (receiver.playback, receiver.song) == ("Play", "Track 1.2")
+
+
+async def test_server_play_after_stop_of_track_started_on_receiver(hass, receiver, config_entry):
+    tree = receiver.server_tree
+    ketas = tree[1][0]
+    music = ketas[1][0]
+    receiver.lists["SERVER"] = [(tree, 1), (ketas, 1), (music, 1), (music[1][1], 4)]
+    receiver.song = "Track 2.4"
+    await setup_entry(hass, config_entry)
+
+    await _call(hass, "media_stop")
+    await _call(hass, "media_play")
+
+    assert (receiver.playback, receiver.song) == ("Play", "Track 2.4")
+
+
 async def test_server_play_track_on_page_two(hass, hass_ws_client, receiver, config_entry):
     await setup_entry(hass, config_entry)
 
@@ -433,6 +588,19 @@ async def test_net_radio_play_station(hass, hass_ws_client, receiver, config_ent
     assert (attributes["media_channel"], attributes["media_title"]) == ("Raadio 2", "Artist - Song")
 
 
+async def test_net_radio_song_encoding_repaired(hass, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    # The receiver reads the station's UTF-8 song title as Latin-1
+    receiver.radio_song = "R2 Päev - Katrin Aarma".encode().decode("latin-1")
+    receiver.station = "Raadio Kuku Türgi"
+    await setup_entry(hass, config_entry)
+
+    attributes = hass.states.get(ENTITY_ID).attributes
+    assert attributes["media_title"] == "R2 Päev - Katrin Aarma"
+    # Correct text stays as it is
+    assert attributes["media_channel"] == "Raadio Kuku Türgi"
+
+
 async def test_net_radio_play_stored_station(hass, receiver, config_entry):
     """An automation plays a station ID saved earlier, with the menu elsewhere."""
     receiver.input = "NET RADIO"
@@ -444,6 +612,18 @@ async def test_net_radio_play_stored_station(hass, receiver, config_entry):
                 media_content_type="channel")
 
     assert receiver.station == "Vikerraadio"
+
+
+async def test_browse_in_standby_shows_error(hass, hass_ws_client, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    root = _children(await _browse(hass, hass_ws_client))
+    receiver.power = "Standby"
+
+    response = await _browse(hass, hass_ws_client, root["Radiobrowser"])
+
+    assert not response["success"]
+    assert response["error"]["message"] == "The receiver is in standby"
 
 
 async def test_browse_not_supported_for_passive_input(hass, hass_ws_client, receiver, config_entry):
