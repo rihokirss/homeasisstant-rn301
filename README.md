@@ -46,11 +46,20 @@ This custom component for Home Assistant provides integration with the Yamaha R-
 1. Install using Method 1 or 2 above
 2. Add the following to your `configuration.yaml`:
 
+   Basic YAML (with default interval)
    ```yaml
    media_player:
      - platform: yamaha_rn301
        host: YOUR_RECEIVER_IP
        name: Yamaha R-N301
+   ``` 
+   YAML with Custom Interval
+   ```yaml
+   media_player:
+     - platform: yamaha_rn301
+       host: YOUR_RECEIVER_IP
+       name: Yamaha R-N301
+       play_info_interval: 10  # seconds between Play_Info fetches (default: 5)   
    ```
 
 3. Replace `YOUR_RECEIVER_IP` with your receiver's IP address
