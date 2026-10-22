@@ -141,6 +141,18 @@ async def test_volume_set_rounds(hass, receiver, config_entry):
     assert receiver.volume == 29
 
 
+async def test_volume_set_clamped_to_receiver_range(hass, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    # The service schema rejects such values, so call the entity directly
+    entity = hass.data["media_player"].get_entity(ENTITY_ID)
+
+    await entity.async_set_volume_level(1.5)
+    assert receiver.volume == 100
+
+    await entity.async_set_volume_level(-0.2)
+    assert receiver.volume == 0
+
+
 async def test_volume_step(hass, receiver, config_entry):
     await setup_entry(hass, config_entry)
 

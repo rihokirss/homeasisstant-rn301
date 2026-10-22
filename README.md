@@ -117,6 +117,7 @@ This integration is developed for the Yamaha R-N301 but might work with other Ya
 - **IMPROVED**: A level that holds only one folder is skipped, so YCast bookmarks show directly under "My Stations"
 - **FIXED**: Playing a station checks that the receiver shows the expected list by name, not only by menu depth
 - **FIXED**: Jumps the receiver ignored or answered late made reading long lists fail or could select an item on the wrong page
+- **FIXED**: The volume sent to the receiver is kept within its 0–100 range, which it otherwise rejects (thanks @Neubda, #6)
 
 ### Version 1.5.1 - NET RADIO Browsing
 - **FIXED**: NET RADIO browsing read the list before the receiver finished loading it, showed only the first 8 entries, and did not return to the main menu. It now uses the same browsing as the Server input: pages, back navigation and waiting for the receiver
