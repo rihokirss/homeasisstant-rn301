@@ -103,8 +103,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             host = user_input[CONF_HOST]
             name = user_input[CONF_NAME]
-            interval = user_input.get(CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL)                        
-
+           
             if host != self.config_entry.data.get(CONF_HOST):
                 if any(
                     entry.data.get(CONF_HOST) == host
@@ -122,17 +121,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     title=name,
                     data={**self.config_entry.data, CONF_HOST: host, CONF_NAME: name},
                 )
-                # data becomes entry.options; merge so future options survive
-                return self.async_create_entry(
-                    title="",
-                    data={**self.config_entry.options, CONF_PLAY_INFO_INTERVAL: interval},
-                )
+                return self.async_create_entry(title="", data={})
 
         current_host = self.config_entry.data.get(CONF_HOST, "")
         current_name = self.config_entry.data.get(CONF_NAME, DEFAULT_NAME)
-        current_interval = self.config_entry.options.get(
-            CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL)
-
+        
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
