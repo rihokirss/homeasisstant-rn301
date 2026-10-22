@@ -12,7 +12,7 @@ import voluptuous as vol
 import aiohttp
 
 from homeassistant.components.media_player import (
-    MediaPlayerDeviceClass, MediaPlayerEntity, MediaPlayerState, PLATFORM_SCHEMA, RepeatMode)
+    MediaPlayerDeviceClass, MediaPlayerEntity, MediaPlayerState, MediaPlayerEntityFeature, PLATFORM_SCHEMA, RepeatMode)
 
 from homeassistant.components.media_player.const import MediaType, MediaClass
 from homeassistant.components.media_player.errors import BrowseError
@@ -20,8 +20,6 @@ try:
     from homeassistant.components.media_player.browse_media import BrowseMedia
 except ImportError:
     from homeassistant.components.media_player import BrowseMedia
-from homeassistant.components.media_player import (
-    MediaPlayerEntityFeature)
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.exceptions import HomeAssistantError
 
