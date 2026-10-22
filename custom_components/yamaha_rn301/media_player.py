@@ -40,6 +40,9 @@ POWER_ON_DELAY = 3
 # The Tuner ignores preset selections (with RC="0") for about 0.7 seconds
 # after the input is selected
 TUNER_START_DELAY = 1
+# The receiver still reports playing for about 0.1 seconds after taking
+# Pause or Stop: seconds to wait for it to report the new state
+PLAYBACK_WAIT = 1
 # Why the receiver refuses a command, by its RC code
 RC_ERRORS = {
     '3': "The receiver does not accept this value",
@@ -412,6 +415,15 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def _media_play_control(self, command):
         await self._do_api_put(
             '<{0}><Play_Control><Playback>{1}</Playback></Play_Control></{0}>'.format(self._device_source, command))
+        if command in ("Pause", "Stop"):
+            # So the state refreshed after this call, and Play right after
+            # Stop, see the new state
+            deadline = time.monotonic() + PLAYBACK_WAIT
+            while f"<Playback_Info>{command}<" not in await self._do_api_get(
+                    f"<{self._device_source}><Play_Info>GetParam</Play_Info></{self._device_source}>"):
+                if time.monotonic() >= deadline:
+                    break
+                await asyncio.sleep(0.1)
 
     async def async_media_play(self):
         """Play media"""

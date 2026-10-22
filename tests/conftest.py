@@ -63,6 +63,10 @@ class FakeReceiver:
         # Stored Tuner presets and the one selected
         self.presets = [str(i) for i in range(1, 9)]
         self.preset = "2"
+        # Number of Play_Info polls after Pause or Stop that still report the
+        # old state
+        self.playback_lag_polls = 0
+        self._playback_lag = None
         # Seconds the Tuner ignores presets after it is selected
         self.tuner_start_time = 0
         self._tuner_selected_at = 0
@@ -151,6 +155,8 @@ class FakeReceiver:
         if (playback := section.findtext("Play_Control/Playback")) is not None:
             # Like the real receiver, Play does not start again after Stop,
             # which clears the song
+            if playback in ("Pause", "Stop") and self.playback_lag_polls:
+                self._playback_lag = [self.playback, self.song, self.playback_lag_polls]
             if playback == "Stop":
                 self.song = ""
             if not (playback == "Play" and self.playback == "Stop"):
@@ -245,6 +251,14 @@ class FakeReceiver:
         return f"<Tuner><Play_Control><Preset><Preset_Sel_Item>{items}</Preset_Sel_Item></Preset></Play_Control></Tuner>"
 
     def _play_info(self, tag):
+        if self._playback_lag:
+            playback, song, self._playback_lag[2] = self._playback_lag[0], self._playback_lag[1], self._playback_lag[2] - 1
+            if not self._playback_lag[2]:
+                self._playback_lag = None
+            return self._play_info_xml(tag, playback, song)
+        return self._play_info_xml(tag, self.playback, self.song)
+
+    def _play_info_xml(self, tag, playback, song):
         if tag == "Tuner":
             return (
                 "<Tuner><Play_Info><Feature_Availability>Ready</Feature_Availability>"
@@ -256,11 +270,11 @@ class FakeReceiver:
         if tag == "NET_RADIO":
             meta = f"<Station>{escape(self.station)}</Station><Album></Album><Song>Artist - Song</Song>"
         else:
-            meta = f"<Artist>Artist</Artist><Album>Album</Album><Song>{escape(self.song)}</Song>"
+            meta = f"<Artist>Artist</Artist><Album>Album</Album><Song>{escape(song)}</Song>"
         return (
             f"<{tag}><Play_Info>"
             "<Feature_Availability>Ready</Feature_Availability>"
-            f"<Playback_Info>{self.playback}</Playback_Info>"
+            f"<Playback_Info>{playback}</Playback_Info>"
             f"<Play_Mode><Repeat>{self.repeat}</Repeat><Shuffle>{self.shuffle}</Shuffle></Play_Mode>"
             f"<Meta_Info>{meta}</Meta_Info>"
             f"</Play_Info></{tag}>"

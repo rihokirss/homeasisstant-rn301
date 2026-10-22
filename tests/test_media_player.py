@@ -222,6 +222,8 @@ async def test_mute(hass, receiver, config_entry):
 
 async def test_pause_state(hass, receiver, config_entry):
     await setup_entry(hass, config_entry)
+    # The receiver still reports playing right after Pause
+    receiver.playback_lag_polls = 1
 
     await _call(hass, "media_pause")
 
@@ -429,6 +431,8 @@ async def test_server_play_after_stop_selects_track_again(hass, hass_ws_client, 
     await _call(hass, "media_play")
     assert receiver.playback == "Play"
 
+    # The receiver still reports playing right after Stop
+    receiver.playback_lag_polls = 2
     await _call(hass, "media_stop")
     assert hass.states.get(ENTITY_ID).state == "idle"
     # Browsing a list not read before moves the receiver's menu
