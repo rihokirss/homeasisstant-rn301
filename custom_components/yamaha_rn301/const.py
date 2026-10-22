@@ -3,3 +3,5 @@ DOMAIN = "yamaha_rn301"
 DATA_YAMAHA = 'yamaha_data'
 DEFAULT_NAME = 'Yamaha R-N301'
 DEFAULT_TIMEOUT = 5
+CONF_PLAY_INFO_INTERVAL = "play_info_interval"
+DEFAULT_PLAY_INFO_INTERVAL = 5
