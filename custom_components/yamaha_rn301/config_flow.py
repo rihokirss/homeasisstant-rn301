@@ -6,7 +6,7 @@ from homeassistant.core import callback
 from homeassistant.const import CONF_HOST, CONF_NAME
 from homeassistant.helpers.service_info.ssdp import ATTR_UPNP_SERIAL, SsdpServiceInfo
 from .api import async_get_serial
-from .const import DOMAIN, DEFAULT_NAME
+from .const import DOMAIN, DEFAULT_NAME, CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -103,6 +103,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             host = user_input[CONF_HOST]
             name = user_input[CONF_NAME]
+            interval = user_input.get(CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL)                        
 
             if host != self.config_entry.data.get(CONF_HOST):
                 if any(
@@ -121,16 +122,24 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     title=name,
                     data={**self.config_entry.data, CONF_HOST: host, CONF_NAME: name},
                 )
-                return self.async_create_entry(title="", data={})
+                # data becomes entry.options; merge so future options survive
+                return self.async_create_entry(
+                    title="",
+                    data={**self.config_entry.options, CONF_PLAY_INFO_INTERVAL: interval},
+                )
 
         current_host = self.config_entry.data.get(CONF_HOST, "")
         current_name = self.config_entry.data.get(CONF_NAME, DEFAULT_NAME)
+        current_interval = self.config_entry.options.get(
+            CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL)
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
                 vol.Required(CONF_HOST, default=current_host): str,
                 vol.Required(CONF_NAME, default=current_name): str,
+                vol.Optional(CONF_PLAY_INFO_INTERVAL, default=current_interval):
+                    vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
             }),
             errors=errors
         )
