@@ -408,7 +408,7 @@ The station name appears in `Play_Info` after 2–3 seconds.
 - **Unreachable receiver:** Requests time out after 5 seconds. After 3 failed polls in a row, the entity becomes unavailable.
 - **Failed commands:** When the receiver does not take a command (it cannot be reached, HTTP 400, or an `RC` other than `0`), the action in Home Assistant fails with a message such as "The receiver is in standby".
 - **Play after Stop:** For SERVER, Play after Stop selects the track that played last again. The integration looks for it by name in the folder it was played from in Home Assistant, or else in the list the receiver shows, where the menu stays after a track is selected on the receiver.
-- **Tuner presets:** Next and previous step through the stored presets from `Preset_Sel_Item`.
+- **Tuner presets:** Next and previous step through the stored presets from `Preset_Sel_Item`, starting from the preset in the Tuner's `Play_Info`.
 - **After turning on:** For 3 seconds after the integration turns the receiver on, commands refused with `RC="4"` are sent again every 0.2 seconds. So an automation can turn the receiver on and set the volume right after.
 - **Lists:** While a list loads, `List_Info` is read every 0.15 seconds, for at most 10 seconds. A `Jump_Line` the receiver has not acted on is sent again after 2 seconds.
 - **Saved lists:** Lists read for the media browser are kept, also across restarts. A list older than 10 minutes is read again in the background when it is opened.

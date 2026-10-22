@@ -392,8 +392,12 @@ class YamahaRn301MP(MediaPlayerEntity):
                 value))
 
     async def async_select_source(self, source):
-        await self._do_api_put(
-            '<Main_Zone><Input><Input_Sel>{0}</Input_Sel></Input></Main_Zone>'.format(SOURCE_MAPPING.get(source, source)))
+        input_sel = SOURCE_MAPPING.get(source, source)
+        await self._do_api_put('<Main_Zone><Input><Input_Sel>{0}</Input_Sel></Input></Main_Zone>'.format(input_sel))
+        # Set at once: Home Assistant skips the refresh after this call while a
+        # poll that may have read the old input is running
+        self._source = self._reverse_mapping.get(input_sel, input_sel)
+        self._device_source = input_sel.replace(" ", "_")
 
     async def async_mute_volume(self, mute):
         await self._do_api_put('<Main_Zone><Volume><Mute>{0}</Mute></Volume></Main_Zone>'.format('On' if mute else 'Off'))
@@ -608,18 +612,22 @@ class YamahaRn301MP(MediaPlayerEntity):
 
     async def _step_preset(self, step):
         """Select the next (step 1) or previous (step -1) stored Tuner preset."""
-        data = await self._do_api_get(
-            '<Tuner><Play_Control><Preset><Preset_Sel_Item>GetParam</Preset_Sel_Item></Preset></Play_Control></Tuner>')
+        # The preset is read from the receiver too: the polled one may be
+        # old, e.g. right after switching to the Tuner
         try:
-            items = ET.fromstring(data).find('Tuner/Play_Control/Preset/Preset_Sel_Item')
+            items = ET.fromstring(await self._do_api_get(
+                '<Tuner><Play_Control><Preset><Preset_Sel_Item>GetParam</Preset_Sel_Item></Preset></Play_Control></Tuner>'
+            )).find('Tuner/Play_Control/Preset/Preset_Sel_Item')
+            current = ET.fromstring(await self._do_api_get(
+                '<Tuner><Play_Info>GetParam</Play_Info></Tuner>')).findtext('Tuner/Play_Info/Preset/Preset_Sel')
         except ET.ParseError as e:
             raise HomeAssistantError(f"Cannot read the presets from the receiver at {self._host}") from e
         # The first item, "No Preset", is read-only; the others are the stored presets
         presets = [item.findtext('Param') for item in items if item.findtext('RW') == 'RW'] if items is not None else []
         if not presets:
             raise HomeAssistantError("The receiver has no Tuner presets stored")
-        if self._current_preset in presets:
-            preset = presets[(presets.index(self._current_preset) + step) % len(presets)]
+        if current in presets:
+            preset = presets[(presets.index(current) + step) % len(presets)]
         else:
             preset = presets[0 if step > 0 else -1]
         await self._do_api_put(f'<Tuner><Play_Control><Preset><Preset_Sel>{preset}</Preset_Sel></Preset></Play_Control></Tuner>')

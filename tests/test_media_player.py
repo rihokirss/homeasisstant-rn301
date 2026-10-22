@@ -1,4 +1,6 @@
 """Tests for the Yamaha R-N301 media player entity."""
+from unittest.mock import AsyncMock
+
 import pytest
 from homeassistant.components.media_player import MediaPlayerEntityFeature
 from homeassistant.exceptions import HomeAssistantError
@@ -260,6 +262,18 @@ async def test_select_source(hass, receiver, config_entry):
     receiver.inputs.add("USB")
     await _call(hass, "select_source", source="USB")
     assert receiver.input == "USB"
+
+
+async def test_select_source_shown_while_poll_runs(hass, receiver, config_entry, monkeypatch):
+    await setup_entry(hass, config_entry)
+    # A poll is running, so Home Assistant skips the refresh after the call
+    monkeypatch.setattr(hass.data["media_player"].get_entity(ENTITY_ID), "async_update", AsyncMock())
+
+    await _call(hass, "select_source", source="Tuner")
+
+    assert hass.states.get(ENTITY_ID).attributes["source"] == "Tuner"
+    await _call(hass, "media_next_track")
+    assert receiver.preset == "3"
 
 
 async def test_select_missing_source_raises(hass, receiver, config_entry):
