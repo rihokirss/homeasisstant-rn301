@@ -27,7 +27,7 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT, CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL
+from .const import DOMAIN, DEFAULT_NAME, DEFAULT_TIMEOUT
 
 BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 # Consecutive failed polls before the entity is reported unavailable; the
@@ -83,8 +83,6 @@ SUPPORT_SERVER = _BASE_FEATURES | MediaPlayerEntityFeature.PLAY_MEDIA | MediaPla
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     vol.Required(CONF_HOST): cv.string,
-    vol.Optional(CONF_PLAY_INFO_INTERVAL, default=DEFAULT_PLAY_INFO_INTERVAL):
-        vol.All(vol.Coerce(int), vol.Range(min=1, max=300)),
 })
 SOURCE_MAPPING = {
     'AirPlay': 'AirPlay',
@@ -154,7 +152,6 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
         [YamahaRn301MP(
             config.get(CONF_NAME),
             config.get(CONF_HOST),
-            play_info_interval=config.get(CONF_PLAY_INFO_INTERVAL, DEFAULT_PLAY_INFO_INTERVAL),
         )],
         True,
     )
@@ -177,7 +174,7 @@ class YamahaRn301MP(MediaPlayerEntity):
     # Two steps on the receiver's 0-100 volume scale
     _attr_volume_step = 0.02
 
-    def __init__(self, name, host, unique_id=None, play_info_interval=DEFAULT_PLAY_INFO_INTERVAL):
+    def __init__(self, name, host, unique_id=None):
         self._host = host
         # Config entries pass the entry ID so the entity survives a host change;
         # YAML setups have no entry and keep the host-based ID.
@@ -207,8 +204,6 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._session = None
         self._current_preset = None
         self._failed_updates = 0
-        self._play_info_interval = play_info_interval
-        self._last_play_info_update = 0
         # time.monotonic() when the receiver was last turned on, and when an
         # input was last selected
         self._turned_on_at = None
@@ -292,9 +287,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                     self._device_source = txt.replace(" ", "_")
             # Only refresh Play_Info every configured interval
             if self._pwstate != MediaPlayerState.OFF:
-                if time.monotonic() - self._last_play_info_update >= self._play_info_interval:
-                    await self._update_media_playing()
-                    self._last_play_info_update = time.monotonic()
+                await self._update_media_playing()
         except ET.ParseError as e:
             _LOGGER.error("Failed to parse XML response: %s", e)
         except Exception as e:
