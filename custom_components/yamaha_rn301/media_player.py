@@ -120,6 +120,18 @@ def _path_part(item):
     return f"{item['line_id']}~{quote(item['title'], safe='')}"
 
 
+def _fix_encoding(text):
+    """Undo UTF-8 text read as Latin-1, e.g. "PÃ¤ev" for "Päev".
+
+    The receiver does this to the song titles NET RADIO stations send. Text
+    that is not such a mix-up, such as a correct "ä", is returned as is.
+    """
+    try:
+        return text.encode('latin-1').decode('utf-8')
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
 def _split_part(part):
     """Line number and name of a media ID part; IDs from before 1.5.2 have no name."""
     line_id, _, title = part.partition("~")
@@ -589,7 +601,7 @@ class YamahaRn301MP(MediaPlayerEntity):
                         elif node.tag == "Meta_Info":
                             for meta in node:
                                 if meta.tag in media_meta_mapping and meta.text:
-                                    self._media_meta[media_meta_mapping[meta.tag]] = meta.text.replace('&amp;', '&')
+                                    self._media_meta[media_meta_mapping[meta.tag]] = _fix_encoding(meta.text.replace('&amp;', '&'))
                         elif node.tag == "Playback_Info":
                             self._set_playback_info(node.text)
                         elif node.tag == "Signal_Info":

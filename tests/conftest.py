@@ -60,6 +60,7 @@ class FakeReceiver:
         self.repeat = "Off"
         self.song = "Song"
         self.station = "Station"
+        self.radio_song = "Artist - Song"
         # Stored Tuner presets and the one selected
         self.presets = [str(i) for i in range(1, 9)]
         self.preset = "2"
@@ -268,7 +269,7 @@ class FakeReceiver:
                 "</Play_Info></Tuner>"
             )
         if tag == "NET_RADIO":
-            meta = f"<Station>{escape(self.station)}</Station><Album></Album><Song>Artist - Song</Song>"
+            meta = f"<Station>{escape(self.station)}</Station><Album></Album><Song>{escape(self.radio_song)}</Song>"
         else:
             meta = f"<Artist>Artist</Artist><Album>Album</Album><Song>{escape(song)}</Song>"
         return (

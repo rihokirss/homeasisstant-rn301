@@ -213,6 +213,7 @@ All inputs answer with `Feature_Availability` (`Ready` or `Not Ready`). The othe
 
 - `Playback_Info` is `Play`, `Pause` or `Stop`.
 - For NET RADIO, `Song` is usually "Artist - Title" as the station sends it.
+- **Encoding:** The receiver reads the song title a station sends in UTF-8 as Latin-1 and encodes it again. "Päev" arrives as the UTF-8 bytes of "PÃ¤ev" (`P\xc3\x83\xc2\xa4ev`). The names in lists (`Txt`) are correct UTF-8.
 - `Album_ART` points to an image in Yamaha's own YMF format (`<Format>YMF</Format>`), which a browser cannot show.
 
 NET RADIO example:
@@ -413,6 +414,7 @@ The station name appears in `Play_Info` after 2–3 seconds.
 - **Play after Stop:** For SERVER, Play after Stop selects the track that played last again. The integration looks for it by name in the folder it was played from in Home Assistant, or else in the list the receiver shows, where the menu stays after a track is selected on the receiver.
 - **Tuner presets:** Next and previous step through the stored presets from `Preset_Sel_Item`, starting from the preset in the Tuner's `Play_Info`. Within 1 second of selecting the Tuner, the integration waits before selecting a preset.
 - **After turning on:** For 3 seconds after the integration turns the receiver on, commands refused with `RC="4"` are sent again every 0.2 seconds. So an automation can turn the receiver on and set the volume right after.
+- **Encoding:** Media information that was read as Latin-1 like this is turned back into the original text. Correct text is left as it is.
 - **Lists:** While a list loads, `List_Info` is read every 0.15 seconds, for at most 10 seconds. A `Jump_Line` the receiver has not acted on is sent again after 2 seconds.
 - **Saved lists:** Lists read for the media browser are kept, also across restarts. A list older than 10 minutes is read again in the background when it is opened.
 - **Security:** The API has no authentication, so the receiver should only be reachable on the local network.

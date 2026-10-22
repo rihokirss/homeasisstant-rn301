@@ -588,6 +588,19 @@ async def test_net_radio_play_station(hass, hass_ws_client, receiver, config_ent
     assert (attributes["media_channel"], attributes["media_title"]) == ("Raadio 2", "Artist - Song")
 
 
+async def test_net_radio_song_encoding_repaired(hass, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    # The receiver reads the station's UTF-8 song title as Latin-1
+    receiver.radio_song = "R2 Päev - Katrin Aarma".encode().decode("latin-1")
+    receiver.station = "Raadio Kuku Türgi"
+    await setup_entry(hass, config_entry)
+
+    attributes = hass.states.get(ENTITY_ID).attributes
+    assert attributes["media_title"] == "R2 Päev - Katrin Aarma"
+    # Correct text stays as it is
+    assert attributes["media_channel"] == "Raadio Kuku Türgi"
+
+
 async def test_net_radio_play_stored_station(hass, receiver, config_entry):
     """An automation plays a station ID saved earlier, with the menu elsewhere."""
     receiver.input = "NET RADIO"
