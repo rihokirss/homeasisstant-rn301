@@ -1,5 +1,6 @@
 import html
 import logging
+import re
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -32,6 +33,15 @@ BASE_URL = 'http://{0}/YamahaRemoteControl/ctrl'
 # Consecutive failed polls before the entity is reported unavailable; the
 # receiver occasionally misses a poll in standby
 MAX_FAILED_UPDATES = 3
+# The receiver refuses commands with RC="4" in standby and for about half a
+# second after turning on: commands refused within this many seconds of
+# turning it on are sent again
+POWER_ON_DELAY = 3
+# Why the receiver refuses a command, by its RC code
+RC_ERRORS = {
+    '3': "The receiver does not accept this value",
+    '4': "The receiver is in standby",
+}
 # Polling while a NET RADIO or SERVER list is busy loading; a page takes
 # about half a second, a media server waking up several seconds
 LIST_BUSY_POLL_INTERVAL = 0.15
@@ -51,7 +61,7 @@ _BASE_FEATURES = MediaPlayerEntityFeature.VOLUME_SET | MediaPlayerEntityFeature.
                  MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF | MediaPlayerEntityFeature.SELECT_SOURCE
 
 SUPPORT_YAMAHA = _BASE_FEATURES | MediaPlayerEntityFeature.PLAY | MediaPlayerEntityFeature.PAUSE | MediaPlayerEntityFeature.STOP | \
-                 MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK | MediaPlayerEntityFeature.SHUFFLE_SET
+                 MediaPlayerEntityFeature.NEXT_TRACK | MediaPlayerEntityFeature.PREVIOUS_TRACK
 
 SUPPORTED_PLAYBACK = _BASE_FEATURES
 
@@ -167,6 +177,8 @@ class YamahaRn301MP(MediaPlayerEntity):
         self._session = None
         self._current_preset = None
         self._failed_updates = 0
+        # time.monotonic() when the receiver was last turned on
+        self._turned_on_at = None
         # (menu path, menu name) of the list the receiver shows, per list source tag
         self._list_paths = {}
         # Lists read for browsing: "tag|path" -> {'time': ..., 'listing': ...}
@@ -369,7 +381,7 @@ class YamahaRn301MP(MediaPlayerEntity):
         await self._set_power_state(False)
 
     async def async_set_volume_level(self, volume):
-        # The receiver rejects values outside 0-100 (RC=5, "parameter out of range")
+        # The receiver refuses values outside 0-100
         value = max(0, min(100, round(volume * 100)))
         await self._do_api_put(
             '<Main_Zone><Volume><Lvl><Val>{0}</Val><Exp>0</Exp><Unit></Unit></Lvl></Volume></Main_Zone>'.format(
@@ -428,20 +440,24 @@ class YamahaRn301MP(MediaPlayerEntity):
     async def _set_power_state(self, on):
         await self._do_api_put(
             '<System><Power_Control><Power>{0}</Power></Power_Control></System>'.format("On" if on else "Standby"))
+        if on:
+            self._turned_on_at = time.monotonic()
+
+    async def _post(self, data):
+        """Send a request and return the HTTP status and the response text."""
+        if self._session is None:
+            self._session = async_get_clientsession(self.hass)
+        timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT)
+        data = '<?xml version="1.0" encoding="utf-8"?>' + data
+        async with self._session.post(self._base_url, data=data, timeout=timeout) as req:
+            return req.status, await req.text()
 
     async def _do_api_request(self, data) -> str:
-        data = '<?xml version="1.0" encoding="utf-8"?>' + data
         try:
-            if self._session is None:
-                self._session = async_get_clientsession(self.hass)
-            
-            timeout = aiohttp.ClientTimeout(total=DEFAULT_TIMEOUT)
-            async with self._session.post(self._base_url, data=data, timeout=timeout) as req:
-                if req.status != 200:
-                    _LOGGER.warning("Error doing API request, %d, %s", req.status, data)
-                else:
-                    _LOGGER.debug("API request ok %d", req.status)
-                return await req.text()
+            status, text = await self._post(data)
+            if status != 200:
+                _LOGGER.warning("Error doing API request, %d, %s", status, data)
+            return text
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             # Logged at debug level: async_update reports the receiver going
             # offline once instead of on every poll.
@@ -457,8 +473,28 @@ class YamahaRn301MP(MediaPlayerEntity):
         return response
 
     async def _do_api_put(self, data) -> str:
+        """Send a command, raising HomeAssistantError when the receiver does not carry it out."""
         data = '<YAMAHA_AV cmd="PUT">' + data + '</YAMAHA_AV>'
-        return await self._do_api_request(data)
+        while True:
+            try:
+                status, text = await self._post(data)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                raise HomeAssistantError(f"Cannot reach the receiver at {self._host}") from e
+            # The receiver answers HTTP 200 with RC="0" when it takes a command,
+            # also one it then ignores, such as a selection while a list loads
+            rc = re.search(r'\bRC="(\d+)"', text)
+            code = rc.group(1) if rc else None
+            if status == 200 and code == '0':
+                return text
+            if (code == '4' and self._turned_on_at is not None
+                    and time.monotonic() < self._turned_on_at + POWER_ON_DELAY):
+                await asyncio.sleep(0.2)
+                continue
+            _LOGGER.debug("Receiver refused %s: HTTP %d, RC %s", data, status, code)
+            if status != 200:
+                # HTTP 400: the input has no such command, e.g. shuffle for Spotify
+                raise HomeAssistantError("The receiver does not support this command")
+            raise HomeAssistantError(RC_ERRORS.get(code, f"The receiver refused the command (RC {code})"))
 
     def _nullify_media_fields(self) -> None:
         """Set media fields to null as we don't require them on certain channels"""
@@ -602,8 +638,11 @@ class YamahaRn301MP(MediaPlayerEntity):
             if media_content_id.startswith(f"{src.prefix}_menu:root:"):
                 return await self._browse_list(src, media_content_id)
             raise BrowseError(f"Unknown media ID {media_content_id}")
-        except HomeAssistantError:
+        except BrowseError:
             raise
+        except HomeAssistantError as e:
+            # Such as the receiver being in standby: shown in the media browser
+            raise BrowseError(str(e)) from e
         except Exception as e:
             _LOGGER.exception("Error browsing %s media: %s", src.tag, e)
             raise BrowseError(f"Browsing {self._source} failed") from e

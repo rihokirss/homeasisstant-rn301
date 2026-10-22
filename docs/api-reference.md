@@ -1,106 +1,156 @@
 # Yamaha R-N301 API Reference
 
-This document provides comprehensive documentation for the Yamaha R-N301 XML control API as implemented in the Home Assistant integration.
+The XML control API of the Yamaha R-N301 network receiver, as the Home Assistant integration uses it. Everything here was checked against an R-N301 with firmware 1.13/0.05 in October 2026. Other Yamaha network receivers of the same generation use the same API, but their inputs and details may differ.
 
 ## Table of Contents
 
 - [API Overview](#api-overview)
-- [Basic Communication](#basic-communication)
-- [Main Zone Control](#main-zone-control)
-- [Media Sources](#media-sources)
-- [SERVER Media Browsing](#server-media-browsing)
-- [NET RADIO Control](#net-radio-control)
-- [TUNER Control](#tuner-control)
-- [Error Handling](#error-handling)
+- [Responses and Errors](#responses-and-errors)
+- [System](#system)
+- [Main Zone](#main-zone)
+- [Input Status and Playback](#input-status-and-playback)
+- [Browsing Lists (SERVER and NET RADIO)](#browsing-lists-server-and-net-radio)
+- [Tuner](#tuner)
 - [Examples](#examples)
+- [How the Integration Uses the API](#how-the-integration-uses-the-api)
 
 ## API Overview
 
-The Yamaha R-N301 uses an HTTP-based XML API for remote control. All requests are sent as POST requests to:
+Requests are HTTP POSTs to port 80, without authentication:
 ```
 http://{receiver_ip}/YamahaRemoteControl/ctrl
 ```
 
-### Request Format
-All requests follow this XML structure:
 ```xml
 <YAMAHA_AV cmd="GET|PUT">
-  <!-- Command content -->
+  <!-- Command -->
 </YAMAHA_AV>
 ```
 
-- `GET` commands retrieve information
-- `PUT` commands change settings
+- `GET` reads a value: the element to read holds `GetParam`.
+- `PUT` sends a command or sets a value.
 
-### Response Format
-All responses follow this XML structure:
+The R-N301 has no `desc.xml` file that lists its commands (the request returns 404). Its UPnP description at `http://{receiver_ip}:8080/MediaRenderer/desc.xml` names the control URL and holds the serial number, which is the same as the `System_ID` below.
+
+## Responses and Errors
+
 ```xml
 <YAMAHA_AV rsp="GET|PUT" RC="0">
-  <!-- Response content -->
+  <!-- For GET the values read; for PUT the command's elements, empty -->
 </YAMAHA_AV>
 ```
 
-- `RC="0"` indicates success
-- Non-zero RC values indicate errors
+`RC="0"` means that the receiver took the request. The other answers seen on the R-N301:
 
-## Basic Communication
+| Answer | Meaning | Seen for |
+|--------|---------|----------|
+| HTTP 200, `RC="2"` | The element cannot be read | `GET` of `<System><Power_Control>` or `<Main_Zone><Power_Control>` |
+| HTTP 200, `RC="3"` | The value is not accepted | Volume `-5`, an input the receiver does not have, `<Mute>` other than `On`/`Off`, `Jump_Line` past the end of the list, `Direct_Sel` `Line_9`, `<Repeat>` other than `Off`/`One`/`All`, `Preset_Sel` `0`, `Pause` or `Skip` for NET RADIO |
+| HTTP 200, `RC="4"` | Not in standby | Volume, mute, `Play_Control` and `List_Control` commands in standby and for about half a second after turning on |
+| HTTP 400, empty body | The element does not exist for this zone or input | `<System><Volume>`, `<Main_Zone><Play_Info>`, `<TUNER>` (the element is `<Tuner>`), `Playback` for the Tuner, `Play_Mode` for Spotify and AirPlay |
 
-### Power Control
+`RC="0"` does not mean that the receiver acted on the command. It also answers `RC="0"` to:
+- `Input_Sel` in standby (the receiver stays in standby)
+- Playback commands for an input that is not selected
+- `Direct_Sel`, `Jump_Line` and `Cursor` while a list is loading, which it ignores
+- `Preset_Sel` with a preset number that has no station stored
+- `Play` after `Stop` for SERVER or NET RADIO, which does not start the track or station again
 
-#### Get Power Status
+`GET` requests are answered in standby too.
+
+## System
+
+### Configuration
+
 ```xml
-<YAMAHA_AV cmd="GET">
-  <Main_Zone>
-    <Basic_Status>GetParam</Basic_Status>
-  </Main_Zone>
+<YAMAHA_AV cmd="GET"><System><Config>GetParam</Config></System></YAMAHA_AV>
+```
+
+```xml
+<YAMAHA_AV rsp="GET" RC="0">
+  <System>
+    <Config>
+      <Model_Name>R-N301</Model_Name>
+      <System_ID>0E2FCAE3</System_ID>
+      <Version>1.13/0.05</Version>
+      <Feature_Existence>
+        <Main_Zone>1</Main_Zone><Tuner>1</Tuner><Spotify>1</Spotify><Pandora>0</Pandora>
+        <SERVER>1</SERVER><NET_RADIO>1</NET_RADIO><AirPlay>1</AirPlay>
+      </Feature_Existence>
+    </Config>
+  </System>
 </YAMAHA_AV>
 ```
 
-**Response:**
+`System_ID` is the serial number the receiver announces over SSDP. The integration uses it as the unique ID of the receiver.
+
+### Power
+
+```xml
+<YAMAHA_AV cmd="PUT">
+  <System>
+    <Power_Control>
+      <Power>On|Standby</Power>
+    </Power_Control>
+  </System>
+</YAMAHA_AV>
+```
+
+`<Main_Zone><Power_Control>` also answers `On` with `RC="0"`. The power state is read from the [basic status](#basic-status).
+
+After `On` the receiver refuses other commands with `RC="4"` for about half a second: in a test, a volume command was refused 0.3 s after turning on and taken 0.6 s after. NET RADIO does not resume the last station after turning on.
+
+## Main Zone
+
+### Basic Status
+
+```xml
+<YAMAHA_AV cmd="GET"><Main_Zone><Basic_Status>GetParam</Basic_Status></Main_Zone></YAMAHA_AV>
+```
+
 ```xml
 <YAMAHA_AV rsp="GET" RC="0">
   <Main_Zone>
     <Basic_Status>
       <Power_Control>
-        <Power>On|Off</Power>
+        <Power>On</Power>  <!-- On or Standby -->
       </Power_Control>
-      <!-- Additional status info -->
+      <Volume>
+        <Lvl><Val>18</Val><Exp>0</Exp><Unit></Unit></Lvl>
+        <Mute>Off</Mute>
+      </Volume>
+      <Input>
+        <Input_Sel>NET RADIO</Input_Sel>
+        <Input_Sel_Item_Info>
+          <Param>NET RADIO</Param>
+          <RW>RW</RW>
+          <Title></Title>
+          <Icon><On>/YamahaRemoteControl/Icons/icon067.png</On><Off></Off></Icon>
+          <Src_Name>NET_RADIO</Src_Name>
+          <Src_Number>1</Src_Number>
+        </Input_Sel_Item_Info>
+      </Input>
     </Basic_Status>
   </Main_Zone>
 </YAMAHA_AV>
 ```
 
-#### Set Power State
-```xml
-<YAMAHA_AV cmd="PUT">
-  <Main_Zone>
-    <Power_Control>
-      <Power>On|Off</Power>
-    </Power_Control>
-  </Main_Zone>
-</YAMAHA_AV>
-```
+### Volume
 
-### Volume Control
-
-#### Set Volume Level
 ```xml
 <YAMAHA_AV cmd="PUT">
   <Main_Zone>
     <Volume>
-      <Lvl>
-        <Val>{volume}</Val>
-        <Exp>0</Exp>
-        <Unit></Unit>
-      </Lvl>
+      <Lvl><Val>{volume}</Val><Exp>0</Exp><Unit></Unit></Lvl>
     </Volume>
   </Main_Zone>
 </YAMAHA_AV>
 ```
 
-Volume range: 0 to 100 (Home Assistant's 0.0–1.0 volume level multiplied by 100)
+The scale is 0 to 100; the integration multiplies Home Assistant's 0.0–1.0 volume level by 100. Values outside the scale are refused (`-5` was answered with `RC="3"`).
 
-#### Mute Control
+### Mute
+
 ```xml
 <YAMAHA_AV cmd="PUT">
   <Main_Zone>
@@ -111,578 +161,254 @@ Volume range: 0 to 100 (Home Assistant's 0.0–1.0 volume level multiplied by 10
 </YAMAHA_AV>
 ```
 
-## Main Zone Control
+Volume and mute go under `<Main_Zone>`: the same commands under `<System>` are answered with HTTP 400.
 
-### Input Source Selection
+### Inputs
 
-#### Set Input Source
 ```xml
 <YAMAHA_AV cmd="PUT">
   <Main_Zone>
     <Input>
-      <Input_Sel>{source}</Input_Sel>
+      <Input_Sel>{input}</Input_Sel>
     </Input>
   </Main_Zone>
 </YAMAHA_AV>
 ```
 
-**Available Sources:**
-- `OPTICAL` - Optical digital input
-- `CD` - CD player input  
-- `LINE1`, `LINE2`, `LINE3` - Analog line inputs
-- `Spotify` - Spotify Connect
-- `NET RADIO` - Internet radio
-- `SERVER` - Media server (DLNA/UPnP)
-- `TUNER` - FM/AM radio tuner
-
-### Media Information
-
-#### Get Current Media Info
+The receiver lists its inputs with:
 ```xml
-<YAMAHA_AV cmd="GET">
-  <Main_Zone>
-    <Play_Info>GetParam</Play_Info>
-  </Main_Zone>
-</YAMAHA_AV>
+<YAMAHA_AV cmd="GET"><Main_Zone><Input><Input_Sel_Item>GetParam</Input_Sel_Item></Input></Main_Zone></YAMAHA_AV>
 ```
 
-**Response Structure:**
+| `Input_Sel` | Element of the input's own commands (`Src_Name`) | Source in Home Assistant |
+|-------------|--------------------------------------------------|--------------------------|
+| `Spotify` | `Spotify` | Spotify |
+| `NET RADIO` | `NET_RADIO` | Net Radio |
+| `SERVER` | `SERVER` | Server |
+| `AirPlay` | `AirPlay` | AirPlay |
+| `TUNER` | `Tuner` | Tuner |
+| `CD`, `OPTICAL`, `COAXIAL`, `LINE1`, `LINE2`, `LINE3` | none | CD, Optical, Coaxial, Line 1–3 |
+
+An input name the receiver does not have is answered with `RC="3"`. When you switch to NET RADIO, its menu returns to the top level and the last station does not start again.
+
+## Input Status and Playback
+
+### Play Info
+
+Each input has its own status. There is no `<Main_Zone><Play_Info>` (HTTP 400).
+
+```xml
+<YAMAHA_AV cmd="GET"><{Src_Name}><Play_Info>GetParam</Play_Info></{Src_Name}></YAMAHA_AV>
+```
+
+All inputs answer with `Feature_Availability` (`Ready` or `Not Ready`). The other fields:
+
+| Input | Fields |
+|-------|--------|
+| `SERVER` | `Playback_Info`, `Play_Mode` (`Repeat`, `Shuffle`), `Play_Time` (seconds), `Meta_Info` (`Artist`, `Album`, `Song`), `Album_ART` |
+| `NET_RADIO` | `Playback_Info`, `Play_Time`, `Meta_Info` (`Station`, `Album`, `Song`), `Album_ART` |
+| `Spotify` | `Playback_Info`, `Meta_Info` (`Artist`, `Album`, `Track`), `Input_Logo` |
+| `AirPlay` | `Playback_Info`, `Play_Time`, `Meta_Info` (`Artist`, `Album`, `Song`), `Input_Logo` |
+| `Tuner` | `Search_Mode`, `Preset/Preset_Sel`, `Tuning` (`Band`, `Freq`), `FM_Mode`, `Signal_Info` (`Tuned`, `Stereo`), `Meta_Info` (`Program_Type`, `Program_Service`, `Radio_Text_A`, `Radio_Text_B`, `Clock_Time`) |
+
+- `Playback_Info` is `Play`, `Pause` or `Stop`.
+- For NET RADIO, `Song` is usually "Artist - Title" as the station sends it.
+- `Album_ART` points to an image in Yamaha's own YMF format (`<Format>YMF</Format>`), which a browser cannot show.
+
+NET RADIO example:
 ```xml
 <YAMAHA_AV rsp="GET" RC="0">
-  <Main_Zone>
+  <NET_RADIO>
     <Play_Info>
-      <Input_Name>{source}</Input_Name>
-      <Playback_Info>
-        <Track>{track}</Track>
-        <Artist>{artist}</Artist>
-        <Album>{album}</Album>
-        <Station>{station}</Station>
-        <Playback>{state}</Playback>
-      </Playback_Info>
+      <Feature_Availability>Ready</Feature_Availability>
+      <Playback_Info>Play</Playback_Info>
+      <Play_Time>236</Play_Time>
       <Meta_Info>
-        <Program_Type>{type}</Program_Type>
-        <Program_Service>{service}</Program_Service>
-        <Audio_Mode>{mode}</Audio_Mode>
+        <Station>Raadio 2</Station>
+        <Album></Album>
+        <Song>BECK - Run Away</Song>
       </Meta_Info>
+      <Album_ART><URL></URL><ID>4</ID><Format>YMF</Format></Album_ART>
     </Play_Info>
-  </Main_Zone>
-</YAMAHA_AV>
-```
-
-## Media Sources
-
-### Playback Control
-
-#### Universal Playback Commands
-```xml
-<!-- Play -->
-<YAMAHA_AV cmd="PUT">
-  <{SOURCE}>
-    <Play_Control>
-      <Playback>Play</Playback>
-    </Play_Control>
-  </{SOURCE}>
-</YAMAHA_AV>
-
-<!-- Pause -->
-<YAMAHA_AV cmd="PUT">
-  <{SOURCE}>
-    <Play_Control>
-      <Playback>Pause</Playback>
-    </Play_Control>
-  </{SOURCE}>
-</YAMAHA_AV>
-
-<!-- Stop -->
-<YAMAHA_AV cmd="PUT">
-  <{SOURCE}>
-    <Play_Control>
-      <Playback>Stop</Playback>
-    </Play_Control>
-  </{SOURCE}>
-</YAMAHA_AV>
-
-<!-- Skip Forward -->
-<YAMAHA_AV cmd="PUT">
-  <{SOURCE}>
-    <Play_Control>
-      <Playback>Skip Fwd</Playback>
-    </Play_Control>
-  </{SOURCE}>
-</YAMAHA_AV>
-
-<!-- Skip Reverse -->
-<YAMAHA_AV cmd="PUT">
-  <{SOURCE}>
-    <Play_Control>
-      <Playback>Skip Rev</Playback>
-    </Play_Control>
-  </{SOURCE}>
-</YAMAHA_AV>
-```
-
-Replace `{SOURCE}` with: `Spotify`, `NET_RADIO`, `SERVER`, etc.
-
-## SERVER Media Browsing
-
-The SERVER input provides DLNA/UPnP media browsing capabilities with a hierarchical structure.
-
-### Get Current List
-```xml
-<YAMAHA_AV cmd="GET">
-  <SERVER>
-    <List_Info>GetParam</List_Info>
-  </SERVER>
-</YAMAHA_AV>
-```
-
-**Response Structure:**
-```xml
-<YAMAHA_AV rsp="GET" RC="0">
-  <SERVER>
-    <List_Info>
-      <Menu_Status>Ready|Busy</Menu_Status>
-      <Menu_Layer>{layer_number}</Menu_Layer>
-      <Menu_Name>{current_menu_name}</Menu_Name>
-      <Current_List>
-        <Line_1>
-          <Txt>{item_title}</Txt>
-          <Attribute>Container|Item|Unselectable</Attribute>
-        </Line_1>
-        <!-- More Line_X entries up to Line_8 -->
-      </Current_List>
-      <Cursor_Position>
-        <Current_Line>{current_position}</Current_Line>
-        <Max_Line>{total_items}</Max_Line>
-      </Cursor_Position>
-    </List_Info>
-  </SERVER>
-</YAMAHA_AV>
-```
-
-### Navigation Structure
-
-The SERVER browsing follows a hierarchical structure:
-
-| Layer | Content Type | Example | Attribute | Notes |
-|-------|-------------|---------|-----------|--------|
-| 1 | Media Servers | "ketas", "NAS" | Container | Root level servers |
-| 2 | Media Types | "Music", "Photo", "Video" | Container | Content categories |
-| 3 | Categories | "By Artist", "By Album", "Playlist" | Container | Organization methods |
-| 4 | Collections | Artist names, Album names | Container | Content collections |
-| 5+ | Items/Tracks | Song titles, File names | Item | Playable content |
-
-**Special Attributes:**
-- `Container` - Navigable folders/categories
-- `Item` - Playable tracks/files  
-- `Unselectable` - Empty list items (display padding)
-
-**Example Layer 3 Categories:**
-- `By Folder` - File system structure browsing
-- `All music` - All tracks in flat view
-- `Playlist` - User-created playlists
-- `Smart Playlist` - Auto-generated playlists
-- `By Album` - Browse by album collections
-- `By Artist` - Browse by artist collections
-- `By Genre` - Browse by music genre
-- `Artist/Album` - Combined artist/album view
-
-### Navigation Commands
-
-#### Navigate to Item
-```xml
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <List_Control>
-      <Direct_Sel>Line_{number}</Direct_Sel>
-    </List_Control>
-  </SERVER>
-</YAMAHA_AV>
-```
-
-#### Go Back
-```xml
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <List_Control>
-      <Cursor>Return</Cursor>
-    </List_Control>
-  </SERVER>
-</YAMAHA_AV>
-```
-
-#### Pagination
-```xml
-<!-- Previous Page -->
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <List_Control>
-      <Page>Up</Page>
-    </List_Control>
-  </SERVER>
-</YAMAHA_AV>
-
-<!-- Next Page -->
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <List_Control>
-      <Page>Down</Page>
-    </List_Control>
-  </SERVER>
-</YAMAHA_AV>
-```
-
-### Play Track
-```xml
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <List_Control>
-      <Direct_Sel>Line_{number}</Direct_Sel>
-    </List_Control>
-  </SERVER>
-</YAMAHA_AV>
-```
-*Note: Follow with playback command to start playing*
-
-## NET RADIO Control
-
-### Get Station List
-```xml
-<YAMAHA_AV cmd="GET">
-  <NET_RADIO>
-    <List_Info>GetParam</List_Info>
   </NET_RADIO>
 </YAMAHA_AV>
 ```
 
-**Response Structure:**
+### Playback
+
+```xml
+<YAMAHA_AV cmd="PUT">
+  <{Src_Name}>
+    <Play_Control>
+      <Playback>Play|Pause|Stop|Skip Fwd|Skip Rev</Playback>
+    </Play_Control>
+  </{Src_Name}>
+</YAMAHA_AV>
+```
+
+```xml
+<!-- Shuffle and repeat: SERVER only -->
+<YAMAHA_AV cmd="PUT">
+  <SERVER>
+    <Play_Control>
+      <Play_Mode>
+        <Shuffle>On|Off</Shuffle>
+        <Repeat>Off|One|All</Repeat>
+      </Play_Mode>
+    </Play_Control>
+  </SERVER>
+</YAMAHA_AV>
+```
+
+| Input | `Play` | `Pause` | `Stop` | `Skip Fwd`, `Skip Rev` | `Play_Mode` |
+|-------|--------|---------|--------|------------------------|-------------|
+| `SERVER` | Yes, after `Pause` | Yes | Yes | Yes | Yes |
+| `Spotify` | Taken | Taken | Taken | Taken | HTTP 400 |
+| `AirPlay` | Taken | Taken | Taken | Taken | HTTP 400 |
+| `NET_RADIO` | Taken | `RC="3"` | Yes | `RC="3"` | HTTP 400 |
+| `Tuner` | HTTP 400 | HTTP 400 | HTTP 400 | HTTP 400 | HTTP 400 |
+
+- "Taken": answered with `RC="0"`. The effect could not be checked because nothing was playing over Spotify or AirPlay during the test.
+- After `Stop`, `Play` does not start a SERVER track or NET RADIO station again, although it is answered with `RC="0"`: select it in the list again.
+- A NET RADIO station or SERVER track starts playing when it is selected with `Direct_Sel` (see below), so `Play` is not needed after it.
+- The Tuner is controlled with [presets](#tuner).
+
+## Browsing Lists (SERVER and NET RADIO)
+
+The SERVER and NET RADIO inputs have a menu of lists. The receiver keeps one menu position per input, and the receiver's own display shows it too.
+
+### Reading the List Shown
+
+```xml
+<YAMAHA_AV cmd="GET"><NET_RADIO><List_Info>GetParam</List_Info></NET_RADIO></YAMAHA_AV>
+```
+
 ```xml
 <YAMAHA_AV rsp="GET" RC="0">
   <NET_RADIO>
     <List_Info>
-      <Menu_Status>Ready</Menu_Status>
-      <Menu_Layer>1</Menu_Layer>
+      <Menu_Status>Ready</Menu_Status>  <!-- Busy while the list loads -->
+      <Menu_Layer>1</Menu_Layer>        <!-- 1 is the top level -->
       <Menu_Name>NET RADIO</Menu_Name>
       <Current_List>
-        <Line_1>
-          <Txt>Bookmarks</Txt>
-          <Attribute>Container</Attribute>
-        </Line_1>
-        <Line_2>
-          <Txt>Locations</Txt>
-          <Attribute>Container</Attribute>
-        </Line_2>
-        <!-- More Line_X entries -->
+        <Line_1><Txt>Radiobrowser</Txt><Attribute>Container</Attribute></Line_1>
+        <Line_2><Txt>My Stations</Txt><Attribute>Container</Attribute></Line_2>
+        <Line_3><Txt></Txt><Attribute>Unselectable</Attribute></Line_3>
+        <!-- ... always up to Line_8 -->
       </Current_List>
       <Cursor_Position>
         <Current_Line>1</Current_Line>
-        <Max_Line>8</Max_Line>
+        <Max_Line>2</Max_Line>
       </Cursor_Position>
     </List_Info>
   </NET_RADIO>
 </YAMAHA_AV>
 ```
 
-**NET RADIO Categories:**
-- `Bookmarks` - Saved favorite stations
-- `Locations` - Stations by geographic location
-- `Genres` - Stations categorized by music genre
-- `New Stations` - Recently added stations
-- `Popular Stations` - Most listened stations
-- `Podcasts` - Podcast content
-- `Help` - Help and information
-- `Get Access Code` - Account management
+- **Pages:** `Current_List` holds one page of 8 lines, always numbered `Line_1` to `Line_8`. The page shown is the one that holds `Current_Line`, so line `n` of the page is line `(Current_Line - 1) // 8 * 8 + n` of the list. `Max_Line` is the length of the list.
+- **Attributes:** `Container` is a folder, `Item` a station or track, and `Unselectable` an empty line that fills the page.
+- **Escaping:** The receiver escapes `&` twice in `Txt` (`&amp;amp;`).
+- **In standby:** `List_Info` is answered, `List_Control` is refused with `RC="4"`.
 
-### Navigate and Play Station
-```xml
-<!-- Select Station -->
-<YAMAHA_AV cmd="PUT">
-  <NET_RADIO>
-    <List_Control>
-      <Direct_Sel>Line_{number}</Direct_Sel>
-    </List_Control>
-  </NET_RADIO>
-</YAMAHA_AV>
-
-<!-- Start Playing -->
-<YAMAHA_AV cmd="PUT">
-  <NET_RADIO>
-    <Play_Control>
-      <Playback>Play</Playback>
-    </Play_Control>
-  </NET_RADIO>
-</YAMAHA_AV>
-```
-
-## TUNER Control
-
-### Preset Navigation
-The TUNER source supports 8 presets (1-8) accessed via skip commands:
+### Moving in the List
 
 ```xml
-<!-- Next Preset -->
-<YAMAHA_AV cmd="PUT">
-  <TUNER>
-    <Play_Control>
-      <Playback>Skip Fwd</Playback>
-    </Play_Control>
-  </TUNER>
-</YAMAHA_AV>
+<!-- Select line 1-8 of the page shown: open a folder, or play a station or track -->
+<YAMAHA_AV cmd="PUT"><NET_RADIO><List_Control><Direct_Sel>Line_{1-8}</Direct_Sel></List_Control></NET_RADIO></YAMAHA_AV>
 
-<!-- Previous Preset -->
-<YAMAHA_AV cmd="PUT">
-  <TUNER>
-    <Play_Control>
-      <Playback>Skip Rev</Playback>
-    </Play_Control>
-  </TUNER>
-</YAMAHA_AV>
+<!-- Show the page that holds line n of the list (1 to Max_Line) -->
+<YAMAHA_AV cmd="PUT"><NET_RADIO><List_Control><Jump_Line>{n}</Jump_Line></List_Control></NET_RADIO></YAMAHA_AV>
+
+<!-- Previous or next page -->
+<YAMAHA_AV cmd="PUT"><NET_RADIO><List_Control><Page>Up|Down</Page></List_Control></NET_RADIO></YAMAHA_AV>
+
+<!-- One level up (also answered with RC="0" at the top level) -->
+<YAMAHA_AV cmd="PUT"><NET_RADIO><List_Control><Cursor>Return</Cursor></List_Control></NET_RADIO></YAMAHA_AV>
 ```
 
-### Get TUNER Info
-TUNER information is available in the main Play_Info response:
-- `Station` - Station name or frequency
-- `Radio_Text_A`, `Radio_Text_B` - RDS information
-- `Program_Type` - RDS program type
-- `Program_Service` - RDS service name
+The same commands work with `<SERVER>`.
 
-## Error Handling
+### Timing
 
-### Common Response Codes
-- `RC="0"` - Success
-- `RC="1"` - General error
-- `RC="2"` - Invalid parameter
-- `RC="3"` - Operation not available
-- `RC="4"` - Access denied
-- `RC="5"` - Parameter out of range
+- **Loading:** After each `Direct_Sel` or `Jump_Line`, the list is `Busy` while it loads. For NET RADIO this takes 0.4–1 s per page. A media server that is waking up can take several seconds.
+- **Ignored commands:** The receiver ignores selections while the list is busy, but still answers them with `RC="0"`.
+- **Stale page:** Right after a `Jump_Line`, `List_Info` may still report the old page as `Ready` before it turns `Busy`.
+- **Lost jumps:** Now and then the receiver ignores a `Jump_Line`.
 
-### Empty Responses
-Some requests may return minimal responses when no data is available or the operation only confirms success:
+So after a command, read `List_Info` until it is `Ready` and shows the page you wanted, and send a `Jump_Line` again if it does not.
+
+### SERVER Menu
+
+The levels below the server depend on the media server software. With the server used for testing:
+
+| Layer | Content | Example |
+|-------|---------|---------|
+| 1 | Media servers | `ketas` |
+| 2 | Media types | `Music`, `Photo`, `Video` |
+| 3 | Categories | `By Folder`, `All music`, `Playlist`, `Smart Playlist`, `By Album`, `By Artist`, `By Genre`, `Artist/Album` |
+| 4+ | Folders, artists, albums, then tracks (`Item`) | `By Folder` → `Albums` → an album → `CD1` → tracks |
+
+### NET RADIO Menu
+
+The receiver loads the NET RADIO menu from `radioyamaha.vtuner.com` and `radioyamaha2.vtuner.com`. vTuner no longer serves the R-N301, but [YCast](https://github.com/milaq/YCast) can take its place (see the README).
+
+With YCast the top level is:
+- **Radiobrowser**, with `Genres`, `Countries`, `Languages` and `Most Popular`
+- **My Stations**, with the bookmarks from the YCast settings in a `Bookmarks` folder
+
+The receiver cannot play HTTPS streams: it skips such a station and plays the next station in the list instead.
+
+## Tuner
+
+The input is `TUNER`, but its element is `<Tuner>`.
 
 ```xml
-<YAMAHA_AV rsp="PUT" RC="0">
-  <Main_Zone>
-    <Input>
-      <Input_Sel></Input_Sel>
-    </Input>
-  </Main_Zone>
-</YAMAHA_AV>
+<!-- Stored presets -->
+<YAMAHA_AV cmd="GET"><Tuner><Play_Control><Preset><Preset_Sel_Item>GetParam</Preset_Sel_Item></Preset></Play_Control></Tuner></YAMAHA_AV>
+
+<!-- Select a preset -->
+<YAMAHA_AV cmd="PUT"><Tuner><Play_Control><Preset><Preset_Sel>{n}</Preset_Sel></Preset></Play_Control></Tuner></YAMAHA_AV>
 ```
 
-This typically occurs with:
-- Input switching commands
-- Volume/power changes
-- Playback control commands
+`Preset_Sel_Item` lists `No Preset` and then each stored preset, for example `<Param>2</Param>` with the title `2 : FM 97.80 MHz`.
+- `Preset_Sel` `0` is refused with `RC="3"`.
+- A number with no stored preset is answered with `RC="0"`, but the preset does not change.
 
-### Busy Status
-When navigating SERVER or NET_RADIO, check for busy status:
-```xml
-<Menu_Status>Busy</Menu_Status>
-```
-
-Wait and retry when busy status is detected.
-
-### Timeout Handling
-- Use reasonable timeouts (2-5 seconds) for HTTP requests
-- Implement retry logic for temporary failures
-- Add delays between rapid API calls (200-500ms)
-
-## Real Response Examples
-
-### SERVER List Response (Layer 3 - Music Categories)
-```xml
-<YAMAHA_AV rsp="GET" RC="0">
-  <SERVER>
-    <List_Info>
-      <Menu_Status>Ready</Menu_Status>
-      <Menu_Layer>3</Menu_Layer>
-      <Menu_Name>Music</Menu_Name>
-      <Current_List>
-        <Line_1><Txt>By Folder</Txt><Attribute>Container</Attribute></Line_1>
-        <Line_2><Txt>All music</Txt><Attribute>Container</Attribute></Line_2>
-        <Line_3><Txt>Playlist</Txt><Attribute>Container</Attribute></Line_3>
-        <Line_4><Txt>Smart Playlist</Txt><Attribute>Container</Attribute></Line_4>
-        <Line_5><Txt>By Album</Txt><Attribute>Container</Attribute></Line_5>
-        <Line_6><Txt>By Artist</Txt><Attribute>Container</Attribute></Line_6>
-        <Line_7><Txt>By Genre</Txt><Attribute>Container</Attribute></Line_7>
-        <Line_8><Txt>Artist/Album</Txt><Attribute>Container</Attribute></Line_8>
-      </Current_List>
-      <Cursor_Position>
-        <Current_Line>5</Current_Line>
-        <Max_Line>10</Max_Line>
-      </Cursor_Position>
-    </List_Info>
-  </SERVER>
-</YAMAHA_AV>
-```
-
-### NET RADIO Root Response
-```xml
-<YAMAHA_AV rsp="GET" RC="0">
-  <NET_RADIO>
-    <List_Info>
-      <Menu_Status>Ready</Menu_Status>
-      <Menu_Layer>1</Menu_Layer>
-      <Menu_Name>NET RADIO</Menu_Name>
-      <Current_List>
-        <Line_1><Txt>Bookmarks</Txt><Attribute>Container</Attribute></Line_1>
-        <Line_2><Txt>Locations</Txt><Attribute>Container</Attribute></Line_2>
-        <Line_3><Txt>Genres</Txt><Attribute>Container</Attribute></Line_3>
-        <Line_4><Txt>New Stations</Txt><Attribute>Container</Attribute></Line_4>
-        <Line_5><Txt>Popular Stations</Txt><Attribute>Container</Attribute></Line_5>
-        <Line_6><Txt>Podcasts</Txt><Attribute>Container</Attribute></Line_6>
-        <Line_7><Txt>Help</Txt><Attribute>Container</Attribute></Line_7>
-        <Line_8><Txt>Get Access Code</Txt><Attribute>Container</Attribute></Line_8>
-      </Current_List>
-      <Cursor_Position>
-        <Current_Line>1</Current_Line>
-        <Max_Line>8</Max_Line>
-      </Cursor_Position>
-    </List_Info>
-  </NET_RADIO>
-</YAMAHA_AV>
-```
-
-### Basic Status Response
-```xml
-<YAMAHA_AV rsp="GET" RC="0">
-  <Main_Zone>
-    <Basic_Status>
-      <Power_Control>
-        <Power>On</Power>
-      </Power_Control>
-      <Volume>
-        <Lvl>
-          <Val>25</Val>
-          <Exp>0</Exp>
-          <Unit></Unit>
-        </Lvl>
-        <Mute>Off</Mute>
-      </Volume>
-      <Input>
-        <Input_Sel>NET RADIO</Input_Sel>
-        <Input_Sel_Item_Info>
-          <Param>NET RADIO</Param>
-          <RW>RW</RW>
-          <Title></Title>
-          <Icon>
-            <On>/YamahaRemoteControl/Icons/icon067.png</On>
-            <Off></Off>
-          </Icon>
-          <Src_Name>NET_RADIO</Src_Name>
-          <Src_Number>1</Src_Number>
-        </Input_Sel_Item_Info>
-      </Input>
-    </Basic_Status>
-  </Main_Zone>
-</YAMAHA_AV>
-```
+The frequency is `Val` × 10^-`Exp` in `Unit`: `<Val>9780</Val><Exp>2</Exp><Unit>MHz</Unit>` is 97.80 MHz. The Tuner has no `Playback` commands (HTTP 400).
 
 ## Examples
 
-### Complete Power On and Play Spotify
+### Turn On and Play Spotify
+
 ```xml
-<!-- 1. Power On -->
-<YAMAHA_AV cmd="PUT">
-  <Main_Zone>
-    <Power_Control>
-      <Power>On</Power>
-    </Power_Control>
-  </Main_Zone>
-</YAMAHA_AV>
-
-<!-- 2. Switch to Spotify -->
-<YAMAHA_AV cmd="PUT">
-  <Main_Zone>
-    <Input>
-      <Input_Sel>Spotify</Input_Sel>
-    </Input>
-  </Main_Zone>
-</YAMAHA_AV>
-
-<!-- 3. Start Playing -->
-<YAMAHA_AV cmd="PUT">
-  <Spotify>
-    <Play_Control>
-      <Playback>Play</Playback>
-    </Play_Control>
-  </Spotify>
-</YAMAHA_AV>
+<YAMAHA_AV cmd="PUT"><System><Power_Control><Power>On</Power></Power_Control></System></YAMAHA_AV>
+<!-- Commands are refused with RC="4" for about half a second: send again until RC="0" -->
+<YAMAHA_AV cmd="PUT"><Main_Zone><Input><Input_Sel>Spotify</Input_Sel></Input></Main_Zone></YAMAHA_AV>
+<YAMAHA_AV cmd="PUT"><Spotify><Play_Control><Playback>Play</Playback></Play_Control></Spotify></YAMAHA_AV>
 ```
 
-### Navigate SERVER to Artist and Play Album
+### Play a YCast Bookmark
+
 ```xml
-<!-- 1. Switch to SERVER -->
-<YAMAHA_AV cmd="PUT">
-  <Main_Zone>
-    <Input>
-      <Input_Sel>SERVER</Input_Sel>
-    </Input>
-  </Main_Zone>
-</YAMAHA_AV>
-
-<!-- 2. Get root list -->
-<YAMAHA_AV cmd="GET">
-  <SERVER>
-    <List_Info>GetParam</List_Info>
-  </SERVER>
-</YAMAHA_AV>
-
-<!-- 3. Navigate: Server -> Music -> By Artist -> Artist Name -> Album -->
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <List_Control>
-      <Direct_Sel>Line_1</Direct_Sel>
-    </List_Control>
-  </SERVER>
-</YAMAHA_AV>
-<!-- Repeat navigation steps as needed -->
-
-<!-- 4. Play selected track -->
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <List_Control>
-      <Direct_Sel>Line_1</Direct_Sel>
-    </List_Control>
-  </SERVER>
-</YAMAHA_AV>
-
-<YAMAHA_AV cmd="PUT">
-  <SERVER>
-    <Play_Control>
-      <Playback>Play</Playback>
-    </Play_Control>
-  </SERVER>
-</YAMAHA_AV>
+<YAMAHA_AV cmd="PUT"><Main_Zone><Input><Input_Sel>NET RADIO</Input_Sel></Input></Main_Zone></YAMAHA_AV>
+<!-- The menu is at the top level after switching input; wait until List_Info is Ready -->
+<YAMAHA_AV cmd="PUT"><NET_RADIO><List_Control><Direct_Sel>Line_2</Direct_Sel></List_Control></NET_RADIO></YAMAHA_AV>  <!-- My Stations -->
+<!-- Wait until Ready -->
+<YAMAHA_AV cmd="PUT"><NET_RADIO><List_Control><Direct_Sel>Line_1</Direct_Sel></List_Control></NET_RADIO></YAMAHA_AV>  <!-- Bookmarks -->
+<!-- Wait until Ready -->
+<YAMAHA_AV cmd="PUT"><NET_RADIO><List_Control><Direct_Sel>Line_2</Direct_Sel></List_Control></NET_RADIO></YAMAHA_AV>  <!-- The second station; it starts playing -->
 ```
 
-## Implementation Notes
+The station name appears in `Play_Info` after 2–3 seconds.
 
-### Home Assistant Integration Specifics
+## How the Integration Uses the API
 
-1. **Async Operations**: All API calls should be async to prevent blocking
-2. **Error Recovery**: Implement retry logic for network timeouts
-3. **State Management**: Cache current source and playback state
-4. **Media Browser**: Use hierarchical BrowseMedia objects for SERVER browsing
-5. **Polling**: Update status every 30-60 seconds for current media info
+- **Polling:** Every 10 seconds (Home Assistant's default for media players), the integration reads the basic status, and the input's `Play_Info` when the receiver is on.
+- **Unreachable receiver:** Requests time out after 5 seconds. After 3 failed polls in a row, the entity becomes unavailable.
+- **Failed commands:** When the receiver does not take a command (it cannot be reached, HTTP 400, or an `RC` other than `0`), the action in Home Assistant fails with a message such as "The receiver is in standby".
+- **After turning on:** For 3 seconds after the integration turns the receiver on, commands refused with `RC="4"` are sent again every 0.2 seconds. So an automation can turn the receiver on and set the volume right after.
+- **Lists:** While a list loads, `List_Info` is read every 0.15 seconds, for at most 10 seconds. A `Jump_Line` the receiver has not acted on is sent again after 2 seconds.
+- **Saved lists:** Lists read for the media browser are kept, also across restarts. A list older than 10 minutes is read again in the background when it is opened.
+- **Security:** The API has no authentication, so the receiver should only be reachable on the local network.
 
-### Performance Considerations
-
-1. **Rate Limiting**: Don't send requests faster than every 200ms
-2. **Busy Handling**: Always check Menu_Status before proceeding
-3. **Connection Pooling**: Reuse HTTP connections when possible
-4. **Caching**: Cache navigation state to reduce API calls
-
-### Security Considerations
-
-1. **Local Network Only**: R-N301 should only be accessible on local network
-2. **No Authentication**: The API has no built-in authentication
-3. **Input Validation**: Validate all user inputs before sending to receiver
-4. **Error Logging**: Log errors without exposing sensitive information
-
-## Changelog
-
-- **v1.4.1**: Added intelligent media type detection based on menu layer and names
-- **v1.4.0**: Added comprehensive SERVER media browsing support
-- **v1.3.0**: Added NET RADIO browsing and TUNER preset support
-- **v1.2.0**: Initial API documentation and Home Assistant integration
+The integration's changelog is in the [README](../README.md#recent-updates).

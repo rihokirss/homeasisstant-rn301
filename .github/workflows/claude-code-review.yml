@@ -12,6 +12,8 @@ on:
 
 jobs:
   claude-review:
+    # Pull requests from forks get no secrets, so the review cannot run there
+    if: github.event.pull_request.head.repo.full_name == github.repository
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||

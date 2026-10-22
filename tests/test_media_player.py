@@ -1,5 +1,7 @@
 """Tests for the Yamaha R-N301 media player entity."""
+import pytest
 from homeassistant.components.media_player import MediaPlayerEntityFeature
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar, device_registry as dr, entity_registry as er, issue_registry as ir)
 from homeassistant.helpers.entity_component import async_update_entity
@@ -133,6 +135,47 @@ async def test_passive_input_features(hass, receiver, config_entry):
     assert features & MediaPlayerEntityFeature.VOLUME_STEP
 
 
+async def test_spotify_features(hass, receiver, config_entry):
+    receiver.input = "Spotify"
+    await setup_entry(hass, config_entry)
+
+    features = hass.states.get(ENTITY_ID).attributes["supported_features"]
+    assert features & MediaPlayerEntityFeature.PAUSE
+    # The receiver has no shuffle or repeat for Spotify and AirPlay (HTTP 400)
+    assert not features & MediaPlayerEntityFeature.SHUFFLE_SET
+    with pytest.raises(HomeAssistantError, match="does not support this command"):
+        await hass.data["media_player"].get_entity(ENTITY_ID).async_set_shuffle(True)
+
+
+async def test_command_in_standby_raises(hass, receiver, config_entry):
+    receiver.power = "Standby"
+    await setup_entry(hass, config_entry)
+
+    with pytest.raises(HomeAssistantError, match="The receiver is in standby"):
+        await _call(hass, "volume_set", volume_level=0.3)
+    assert receiver.volume == 25
+
+
+async def test_command_right_after_turn_on_is_sent_again(hass, receiver, config_entry):
+    receiver.power = "Standby"
+    receiver.start_up_refusals = 2
+    await setup_entry(hass, config_entry)
+
+    # As in an automation that turns the receiver on and sets the volume
+    await _call(hass, "turn_on")
+    await _call(hass, "volume_set", volume_level=0.3)
+
+    assert receiver.volume == 30
+
+
+async def test_command_to_unreachable_receiver_raises(hass, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+    receiver.online = False
+
+    with pytest.raises(HomeAssistantError, match="Cannot reach the receiver"):
+        await _call(hass, "media_pause")
+
+
 async def test_volume_set_rounds(hass, receiver, config_entry):
     await setup_entry(hass, config_entry)
 
@@ -190,9 +233,19 @@ async def test_select_source(hass, receiver, config_entry):
     assert receiver.input == "COAXIAL"
     assert hass.states.get(ENTITY_ID).attributes["source"] == "Coaxial"
 
-    # A raw input name the integration does not know is passed through as is.
+    # A raw input name the integration does not know is passed through as
+    # is, for receivers with other inputs
+    receiver.inputs.add("USB")
     await _call(hass, "select_source", source="USB")
     assert receiver.input == "USB"
+
+
+async def test_select_missing_source_raises(hass, receiver, config_entry):
+    await setup_entry(hass, config_entry)
+
+    with pytest.raises(HomeAssistantError, match="does not accept this value"):
+        await _call(hass, "select_source", source="USB")
+    assert receiver.input == "SERVER"
 
 
 async def test_unique_id_migrated_from_host(hass, receiver, config_entry):
@@ -444,6 +497,18 @@ async def test_net_radio_play_stored_station(hass, receiver, config_entry):
                 media_content_type="channel")
 
     assert receiver.station == "Vikerraadio"
+
+
+async def test_browse_in_standby_shows_error(hass, hass_ws_client, receiver, config_entry):
+    receiver.input = "NET RADIO"
+    await setup_entry(hass, config_entry)
+    root = _children(await _browse(hass, hass_ws_client))
+    receiver.power = "Standby"
+
+    response = await _browse(hass, hass_ws_client, root["Radiobrowser"])
+
+    assert not response["success"]
+    assert response["error"]["message"] == "The receiver is in standby"
 
 
 async def test_browse_not_supported_for_passive_input(hass, hass_ws_client, receiver, config_entry):

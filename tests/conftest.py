@@ -33,6 +33,8 @@ NET_RADIO_TREE = ("NET RADIO", [
     ]),
     ("My Stations", [("Bookmarks", [("Sky Plus", None), ("Raadio 2", None)])]),
 ])
+# Inputs of an R-N301 (Main_Zone/Input/Input_Sel_Item)
+INPUTS = {"Spotify", "NET RADIO", "SERVER", "AirPlay", "TUNER", "CD", "OPTICAL", "COAXIAL", "LINE1", "LINE2", "LINE3"}
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +47,7 @@ class FakeReceiver:
 
     def __init__(self):
         self.hosts = {HOST}
+        self.inputs = set(INPUTS)
         self.online = True
         self.serial = SERIAL
         self.power = "On"
@@ -71,18 +74,24 @@ class FakeReceiver:
         self._pending_jump = None
         # Number of Jump_Line commands to ignore, as the receiver now and then does
         self.ignore_jumps = 0
+        # Number of commands refused with RC 4 after turning on, while the
+        # receiver starts up
+        self.start_up_refusals = 0
+        self._refusals_left = 0
 
     async def handle(self, method, url, data):
         if not self.online or url.host not in self.hosts:
             raise asyncio.TimeoutError
         root = ET.fromstring(data.encode())
         section = root[0]
-        if section.tag == "System" and section.find("Volume") is not None:
-            # The real R-N301 rejects volume commands under <System>.
+        if (section.tag == "System" and section.find("Volume") is not None
+                or section.tag in ("Spotify", "AirPlay") and section.find("Play_Control/Play_Mode") is not None):
+            # The real R-N301 answers HTTP 400 to elements it does not have
             return AiohttpClientMockResponse("post", url, status=400)
+        rc = "0"
         if root.get("cmd") == "PUT":
             self.puts.append(ET.tostring(section, encoding="unicode"))
-            self._apply(section)
+            rc = self._put(section)
             body = ""
         elif section.tag == "System" and section.find("Config") is not None:
             body = f"<System><Config><Model_Name>R-N301</Model_Name><System_ID>{self.serial}</System_ID></Config></System>"
@@ -95,15 +104,35 @@ class FakeReceiver:
         else:
             body = ""
         return AiohttpClientMockResponse(
-            "post", url, text=f'<YAMAHA_AV rsp="{root.get("cmd")}" RC="0">{body}</YAMAHA_AV>')
+            "post", url, text=f'<YAMAHA_AV rsp="{root.get("cmd")}" RC="{rc}">{body}</YAMAHA_AV>')
+
+    def _put(self, section):
+        """Carry out a command like the receiver and return its RC code."""
+        if (power := section.findtext("Power_Control/Power")) is not None:
+            if power == "On" and self.power != "On":
+                self._refusals_left = self.start_up_refusals
+            self.power = power
+            return "0"
+        if (sel := section.findtext("Input/Input_Sel")) is not None:
+            # Taken also in standby
+            if sel not in self.inputs:
+                return "3"
+            self.input = sel
+            return "0"
+        if self.power != "On":
+            return "4"
+        if self._refusals_left:
+            self._refusals_left -= 1
+            return "4"
+        if (val := section.findtext("Volume/Lvl/Val")) is not None and not 0 <= int(val) <= 100:
+            return "3"
+        return self._apply(section) or "0"
 
     def _apply(self, section):
         if (val := section.findtext("Volume/Lvl/Val")) is not None:
             self.volume = int(val)
         if (mute := section.findtext("Volume/Mute")) is not None:
             self.mute = mute
-        if (sel := section.findtext("Input/Input_Sel")) is not None:
-            self.input = sel
         if (shuffle := section.findtext("Play_Control/Play_Mode/Shuffle")) is not None:
             self.shuffle = shuffle
         if (repeat := section.findtext("Play_Control/Play_Mode/Repeat")) is not None:
@@ -111,9 +140,11 @@ class FakeReceiver:
         if (playback := section.findtext("Play_Control/Playback")) is not None:
             self.playback = playback
         if section.tag in self.lists and section.find("List_Control") is not None:
-            self._list_control(self.lists[section.tag], section.find("List_Control"))
+            return self._list_control(self.lists[section.tag], section.find("List_Control"))
+        return None
 
     def _list_control(self, stack, control):
+        """Move in a list like the receiver; return "3" for a line it does not have."""
         node, line = stack[-1]
         items = node[1]
         page_start = (line - 1) // 8 * 8 + 1
@@ -121,11 +152,15 @@ class FakeReceiver:
             if self.ignore_jumps:
                 self.ignore_jumps -= 1
                 return
+            if not 1 <= int(jump) <= len(items):
+                return "3"
             self._pending_jump = [stack, int(jump), self.jump_lag_polls]
         elif self._busy_left:
             # Like the real receiver, ignore selections while loading a list
             return
         elif (sel := control.findtext("Direct_Sel")) is not None:
+            if not page_start + int(sel[5:]) - 1 <= len(items):
+                return "3"
             title, children = items[page_start + int(sel[5:]) - 2]
             if children is None:
                 self.song = self.station = title
