@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_component import async_update_entity
 
 from custom_components.yamaha_rn301.const import DOMAIN
 
-from .conftest import ENTITY_ID, HOST, NET_RADIO_TREE, setup_entry
+from .conftest import ENTITY_ID, HOST, NET_RADIO_TREE, SERIAL, VERSION, setup_entry
 
 
 async def _call(hass, service, **data):
@@ -52,7 +52,16 @@ async def test_device(hass, receiver, config_entry):
     device = dr.async_get(hass).async_get(entity.device_id)
     assert (device.manufacturer, device.model, device.name) == ("Yamaha", "R-N301", "Yamaha R-N301")
     assert device.identifiers == {(DOMAIN, config_entry.entry_id)}
+    assert (device.serial_number, device.sw_version) == (SERIAL, VERSION)
     assert hass.states.get(ENTITY_ID).attributes["friendly_name"] == "Yamaha R-N301"
+
+
+async def test_device_without_serial(hass, receiver, config_entry):
+    receiver.serial = ""
+    await setup_entry(hass, config_entry)
+
+    entity = er.async_get(hass).async_get(ENTITY_ID)
+    assert dr.async_get(hass).async_get(entity.device_id).serial_number is None
 
 
 async def test_airplay_input(hass, receiver, config_entry):

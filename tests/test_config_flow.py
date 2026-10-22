@@ -47,6 +47,14 @@ async def test_user_flow_without_serial_uses_host(hass, receiver):
     assert result["result"].unique_id == f"rn301_{HOST}"
 
 
+async def test_user_flow_without_system_id_uses_host(hass, receiver):
+    receiver.serial = None
+
+    result = await _start_user_flow(hass, {CONF_HOST: HOST, CONF_NAME: NAME})
+
+    assert result["result"].unique_id == f"rn301_{HOST}"
+
+
 async def test_user_flow_cannot_connect(hass, receiver):
     receiver.online = False
 

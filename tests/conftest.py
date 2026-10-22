@@ -16,6 +16,7 @@ from custom_components.yamaha_rn301.const import DOMAIN
 HOST = "192.168.0.226"
 NAME = "Yamaha R-N301"
 SERIAL = "0E2FCAE3"
+VERSION = "1.13/0.05"
 ENTITY_ID = "media_player.yamaha_r_n301"
 
 # Media server menu: (title, children) for folders, (title, None) for tracks.
@@ -50,7 +51,9 @@ class FakeReceiver:
         self.hosts = {HOST}
         self.inputs = set(INPUTS)
         self.online = True
+        # None: the receiver leaves System_ID out of its answer
         self.serial = SERIAL
+        self.version = VERSION
         self.power = "On"
         self.volume = 25
         self.mute = "Off"
@@ -106,7 +109,9 @@ class FakeReceiver:
             rc = self._put(section)
             body = ""
         elif section.tag == "System" and section.find("Config") is not None:
-            body = f"<System><Config><Model_Name>R-N301</Model_Name><System_ID>{self.serial}</System_ID></Config></System>"
+            system_id = f"<System_ID>{self.serial}</System_ID>" if self.serial is not None else ""
+            body = (f"<System><Config><Model_Name>R-N301</Model_Name>{system_id}"
+                    f"<Version>{self.version}</Version></Config></System>")
         elif section.tag == "Main_Zone" and section.find("Basic_Status") is not None:
             body = self._basic_status()
         elif section.tag == "Tuner" and section.find("Play_Control/Preset/Preset_Sel_Item") is not None:

@@ -177,7 +177,7 @@ class YamahaRn301MP(MediaPlayerEntity):
             manufacturer="Yamaha",
             model="R-N301",
             name=name,
-            serial_number=serial,
+            serial_number=serial or None,
             sw_version=version,
             configuration_url=f"http://{host}/",
         )

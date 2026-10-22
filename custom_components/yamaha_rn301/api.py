@@ -38,8 +38,8 @@ async def async_get_serial(hass, host):
     The System_ID is also the UPnP serial number the receiver announces over
     SSDP. An empty string means the receiver answered without one.
     """
-    root = await _async_fetch_system_config_root(hass, host)
-    return root.findtext("System/Config/System_ID") if root is not None else None
+    serial, _version = await async_get_system_info(hass, host)
+    return serial
 
 
 async def async_get_system_info(hass, host):
