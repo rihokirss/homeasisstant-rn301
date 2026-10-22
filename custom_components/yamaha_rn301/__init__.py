@@ -4,7 +4,7 @@ from homeassistant.core import HomeAssistant, callback
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from .api import async_get_serial
-from .const import DOMAIN, DATA_YAMAHA
+from .const import DOMAIN
 
 # Since this integration supports both config entries and YAML configuration,
 # we need to define a CONFIG_SCHEMA
@@ -12,10 +12,7 @@ CONFIG_SCHEMA = cv.empty_config_schema(DOMAIN)
 
 def setup(hass, config):
     """Set up the Yamaha R-N301 component."""
-    hass.data[DATA_YAMAHA] = {}
-
     # Here could be code for discovering receivers or other necessary setup
-
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
